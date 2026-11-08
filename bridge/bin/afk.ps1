@@ -112,7 +112,7 @@ function Invoke-AfkTurn($s, $m) {
   )
   Set-Content -Path $task -Value ($body -join "`n") -Encoding UTF8
 
-  if ($DryRun) { Log "DRYRUN would run pi for $($m.hash) (task $task)"; return 'DRYRUN' }
+  if ($DryRun) { Log "DRYRUN would run pi for $($m.hash) (task $task)"; return @{ code = 'dry'; blocked = '' } }
   $prompt = "UNATTENDED AFK TURN. Read the task file $task and carry out its rules in order. Reply once via the stunkus tool."
   $outF = "$task.out"; $errF = "$task.err"
   # A hung model run cannot be allowed to hold the loop: this is the one place a timeout earns its keep, and
@@ -134,6 +134,11 @@ function Invoke-AfkTurn($s, $m) {
   $out = ((Get-Content $outF -Raw -EA 0) + "`n" + (Get-Content $errF -Raw -EA 0))
   if ($timed) { Defer $s $m.hash "the model run for this turned no answer inside $PiTimeoutSec s" $m.text }
   Add-Content -Path (Join-Path $Tasks ("{0}.out" -f $id)) -Value $out -Encoding UTF8
+  # "the run finished" is not "the reply arrived". A refusal to type is a real answer from the bridge and has
+  # to leave the turn open, or the ledger marks it answered and it is lost the way a dropped packet is lost.
+  $blocked = ''
+  if ($out -match 'WRONG_TAB|SEND_UNVERIFIED|SESSION_LOCKED|NO_COMPOSER|REDACTED|TOO_LONG|RATE_CAP') { $blocked = $Matches[0] }
+  return @{ code = $code; blocked = $blocked }
   $ran = @(@($s.runs) | Where-Object { $_ }) + , [pscustomobject]@{ at = (Get-Date).ToString('o'); hash = $m.hash; code = $code; secs = $script:sw.Elapsed.Seconds }
   if ($ran.Count -gt 60) { $ran = $ran[-60..-1] }
   $s | Add-Member -NotePropertyName runs -NotePropertyValue $ran -Force
@@ -173,6 +178,8 @@ switch ($Verb) {
     $age = if ($s.last_read) { [int]((Get-Date) - [DateTime]$s.last_read).TotalSeconds } else { -1 }
     Write-Output ("afk={0} since={1} answered={2} runs={3} deferred={4}" -f $s.afk, $s.since, @(@($s.answered)).Count, @(@($s.runs)).Count, $n)
     Write-Output ("last_read={0}s ago ({1} turns visible)" -f $age, $s.last_count)
+    $held = @(@($s.hold) | Where-Object { $_ -and [DateTime]$_.until -gt (Get-Date) })
+    if ($held.Count) { Write-Output ("held for retry: {0} ({1})" -f $held.Count, (($held | ForEach-Object { $_.hash + ':' + $_.why }) -join ' ')) }
     Write-Output ("last log: {0}" -f ((Get-Content $LogF -EA 0 | Select-Object -Last 1)))
     break
   }
@@ -254,8 +261,20 @@ switch ($Verb) {
             continue
           }
         }
+        # Backoff, not a retry storm: a turn whose reply could not be typed stays open, but trying every 45s
+        # against a browser that is on the wrong tab would burn the hourly cap and then give up anyway.
+        $hold = @(@($s.hold) | Where-Object { $_.hash -eq $m.hash })
+        if ($hold.Count -and [DateTime]$hold[0].until -gt (Get-Date)) { continue }
+
         Log ("AFK turn for {0} ({1} chars)" -f $m.hash, $m.chars)
-        [void](Invoke-AfkTurn $s $m)
+        $r = Invoke-AfkTurn $s $m
+        if ($r.blocked) {
+          Log ("reply blocked ({0}) - leaving the turn open, retrying in 5 min" -f $r.blocked)
+          $holds = @(@($s.hold) | Where-Object { $_ -and $_.hash -ne $m.hash }) + , @{ hash = $m.hash; until = (Get-Date).AddMinutes(5).ToString('o'); why = $r.blocked }
+          $s | Add-Member -NotePropertyName hold -NotePropertyValue ($holds | Select-Object -Last 40) -Force
+          Set-S $s
+          continue                       # deliberately NOT added to `answered`
+        }
         $s | Add-Member -NotePropertyName answered -NotePropertyValue (@(@($s.answered) + $m.hash | Select-Object -Last 200)) -Force
         Set-S $s
       }

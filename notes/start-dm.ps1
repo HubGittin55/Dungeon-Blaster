@@ -19,7 +19,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $Exe     = 'C:\dm\bin\llama\llama-server.exe'
-$Model   = 'C:\dm\models\Hermes3.6-35B-A3B-Uncensored-Genesis-MTP-MXFP4.gguf'
+$Model   = 'C:\dm\models\Hermes3.6-35B-A3B-MTP-MXFP4exp-Q4K_S.gguf'
 $Template= 'C:\dm\models\chat_template.jinja'   # vendored community template, NOT the GGUF-embedded stock one
 $Logs    = 'C:\dm\logs'
 New-Item -ItemType Directory -Force -Path $Logs | Out-Null

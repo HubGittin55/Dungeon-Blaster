@@ -52,6 +52,7 @@ Add-Type -Namespace Native -MemberDefinition @'
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError=true)] public static extern bool PrintWindow(System.IntPtr h, System.IntPtr hdc, uint flags);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
+[System.Runtime.InteropServices.DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)] public static extern int GetWindowText(System.IntPtr h, System.Text.StringBuilder s, int n);
 '@ -Name Win32
 [Native.Win32]::SetProcessDPIAware() | Out-Null
 
@@ -342,6 +343,33 @@ switch ($Verb) {
     if ($recent.Count -ge $cap) { Write-Output "RATE_CAP: $cap messages/hour reached ($($recent.Count)). Wait, or raise DB_MAX_PER_HOUR deliberately."; exit 6 }
 
     if (-not $target.edit) { Write-Output "NO_COMPOSER: $($target.note)"; exit 3 }
+    # The visible tab is the only honest answer to "where will these keystrokes land". Find-Target proves the
+    # target exists by finding a document matching /Stunkus/, and with the Muse tab in the background that
+    # document still gets handed back - invisible, focusable-looking, and unable to receive what we type, so the
+    # keystrokes and the Enter that submits land on whatever tab the user is looking at. The first time that
+    # happened the front tab was GitHub's "Personal Access Tokens (Classic)" page. The window title tracks the
+    # selected tab, so the title is the check, and it runs before the clipboard is touched.
+    $visTitle = ''
+    try { $visTitle = [string]$target.window.Current.Name } catch { }
+    if (-not $visTitle) {
+      # UIA's window Name came back empty in the field, which would have made this check a permanent lockout.
+      # Win32 window text is the ground truth for a top-level window title, so ask the window itself.
+      $sb = New-Object System.Text.StringBuilder 512
+      [void][Native.Win32]::GetWindowText($target.hwnd, $sb, 512)
+      $visTitle = $sb.ToString()
+    }
+    if ($visTitle -and $visTitle -notmatch 'Stunkus') {
+      Log-Line ([ordered]@{ dir = 'blocked'; code = 'WRONG_TAB'; title = $visTitle; chars = $text.Length })
+      Write-Output "WRONG_TAB: the visible Firefox tab is '$visTitle', not the Stunkus chat. Nothing was typed."
+      Write-Output '         Reads still work against a background tab. Click the Muse tab, then retry.'
+      exit 11
+    }
+    if (-not $visTitle) {
+      Log-Line ([ordered]@{ dir = 'blocked'; code = 'TITLE_UNKNOWN'; chars = $text.Length })
+      Write-Output 'TITLE_UNKNOWN: no window title from UIA or Win32, so there is no evidence which tab is in front. Nothing was typed.'
+      Write-Output '         Bring the Stunkus tab to the front of that window and retry (pass --ForceTitle if you have verified it by eye).'
+      exit 12
+    }
     Set-Foreground $target.hwnd
     # SetFocus is an instance method on the element. The [FocusPattern] *type literal* does not resolve in
     # Windows PowerShell and aborted the first real send before a single key was pressed.

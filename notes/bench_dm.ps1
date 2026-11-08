@@ -1,4 +1,4 @@
-# Dungeon Blaster - DM model bench, native Windows (no WSL2, no bash, no Invoke-WebRequest)
+# Dungeon Blaster - DM model bench, native Windows (no bash, no Invoke-WebRequest)
 #
 #   .\bench_dm.ps1 A   build/backend + plain decode tok/s  (the number the architecture doc lacks)
 #   .\bench_dm.ps1 B   MTP on: real tok/s + acceptance length  (the MTP go/no-go)

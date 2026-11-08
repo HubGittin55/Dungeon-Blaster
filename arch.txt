@@ -1,3 +1,8 @@
+NOTE - SUPERSEDED TEXT DUMP. Extracted text from an early architecture PDF, kept for the
+reasoning in it. Where it conflicts with DEPENDENCIES.md, README.md or notes/, those win:
+everything runs native Windows x64, nothing is built from source, and the shipping DM
+artifact is a local requant (see notes/model-review-qwen36-hermes-mtp.md).
+
 ARCHITECTURE DOCUMENT - PLANNING STAGE
 
 Dungeon Blaster
@@ -68,7 +73,7 @@ system                                                 the harness, and the oper
             VRAM (Ada, compute capability sm_89)       optionally, voice. Never assumed to hold
                                                        everything at once.
 
-            Windows host, Ubuntu under WSL2 for all    Matches the established pattern for local agent
+            native Windows x64 for every build    Matches the established pattern for local agent
             builds and servers                         work on Windows machines.
 
 Expected DM speed on this laptop
@@ -105,15 +110,15 @@ a running ComfyUI server through Comfy MCP to produce game assets.
 
 Runtime                Job                                                                 Runs on
 Pi agent harness       Orchestration, tool calling, rules retrieval, turn state machine
-llama-server           Serves the DM model over a local OpenAI-compatible API              CPU, WSL2
+llama-server           Serves the DM model over a local OpenAI-compatible API              CPU, native Windows
 audio.cpp              Microphone, voice activity detection, speech-to-text, and text-to-
-                       speech in one C++ (ggml) runtime with no Python dependency          CPU, WSL2
+                       speech in one C++ (ggml) runtime with no Python dependency          CPU, native Windows
 ComfyUI + Comfy        Image generation workflows, exposed to Pi as MCP tools
 MCP                                                                                        CPU or GPU
-Game tracker (in Pi /  Inventory, materials, tiers, levels, XP, asset cache index          bursts, WSL2
+Game tracker (in Pi /  Inventory, materials, tiers, levels, XP, asset cache index          bursts, native Windows
 client backend)
                                                                                            GPU bursts,
-                                                                                           WSL2
+                                                                                           native Windows
 
                                                                                            CPU, local files /
                                                                                            database
@@ -478,10 +483,10 @@ GPU VRAM,    Anima stack about 5.6 GB (less in INT8    draw the art. Simultaneou
 Disk         Models plus a growing asset cache         by ID and hash; pruning is by location or
                                                        campaign, never silently.
 
-WSL2 memory ceiling, set before anything loads: WSL2 defaults to 50 percent of host RAM, which
-is 16 GB on this laptop, less than the DM needs. Set memory=24GB to 28GB in
-%UserProfile%\.wslconfig , then run wsl --shutdown to apply it, leaving a few gigabytes for
-Windows.
+Memory lives in the host, no VM layer in between: no hypervisor balloon, no default            
+50-percent-of-RAM ceiling, no second page cache, and no config file to remember before
+the model will fit. What does matter on a laptop is the power plan and the AC brick:        
+on battery the DM decodes at a fraction of its measured speed, so bench plugged in.
 
 Dungeon Blaster - Architecture                  Planning stage - November 2026                          14
 Data model and interfaces
@@ -540,11 +545,11 @@ Dungeon Blaster - Architecture  Planning stage - November 2026                  
 
 Environment
 
-   Install WSL2 and Ubuntu on the laptop. Apply the .wslconfig memory setting from the budgets page
-   before loading any model.
-   Build llama.cpp from source in WSL2 for a CPU-only llama-server. A CPU build skips CUDA entirely and
-   keeps the server simple and portable.
-   Build audio.cpp from source with CMake in the same environment.
+   Install the pinned native Windows x64 binaries listed in DEPENDENCIES.md. Nothing is built       
+   from source. Check free disk first: the DM artifact alone is 17.97 GiB.
+   Run the prebuilt llama-server on the CPU path. CPU-only is still the shipping choice for             
+   the DM: it keeps the GPU free for narrator TTS and image generation.
+   Unpack the matching prebuilt audio.cpp builds: CPU for ASR/VAD/Kokoro, CUDA for narrator TTS.
    Install ComfyUI and the Comfy MCP server; register Anima workflows for item, portrait, and environment
    templates with fixed sizes per asset kind.
    If GPU offload is ever added for the LLM, the laptop card is Ada (sm_89). Desktop-specific GPU pins for
@@ -561,7 +566,7 @@ Game client                     Player launch  Resident; reconnects to Pi if res
 
 First-run checklist
 
-   Confirm WSL2 reports the configured memory, not the 16 GB default.
+   Confirm the power plan is on high performance and the AC brick is attached before benching.
    Load the DM and hold a five-turn conversation with tool calls before any art or voice is wired in.
    Benchmark tokens per second and seconds per Anima image on this laptop; replace the estimates in this
    document.

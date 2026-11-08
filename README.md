@@ -9,6 +9,8 @@ everything else is judged against.
 
 ## Where things are
 
+- `DEPENDENCIES.md` - **fresh Windows 11 machine? start here.** Every binary, model file, hash and
+  launch flag, each one read off the reference machine rather than remembered.
 - `docs/tools.md` - the `resolve_round` contract, gate order, rejection codes, retry policy.
 - `rules/rules.md` - the rules document. **Law, not lore:** the fenced JSON blocks are canonical and the
   prose is explanation. If they disagree, JSON wins and the prose is a bug.

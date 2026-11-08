@@ -21,7 +21,7 @@ not cancel that tax; it amortizes it. The experts are not the problem - at 8-of-
 0.50 GiB/token in the two files, i.e. nothing. The whole gap is the dense path: 1.98 vs 1.37 GiB.
 
 Two platform decisions are folded in below and are locked: **native Windows x64 for everything (no
-WSL2/Linux)**, section 3 and 6; and **MTP on** with the non-MTP file kept as the control, section 8.
+native Windows x64**, section 3 and 6; and **MTP on** with the non-MTP file kept as the control, section 8.
 
 Realistic bands for this file on the laptop **[measured, this box, 38-39 GB/s effective — see §9]**:
 
@@ -184,9 +184,9 @@ Cheapest latency wins, all bigger than MTP, none of them compute:
 
 ---
 
-## 3. RAM: fits natively, which is a large part of why WSL2 is gone
+## 3. RAM: fits natively, which is the whole point of running native
 
-**Decision: everything runs native Windows x64. No WSL2, no Linux, no exception.** Verified this is
+**Decision: everything runs native Windows x64. No Linux layer, no exception, no fallback.** Verified this is
 viable for all four runtimes, and it makes the 20 GiB model comfortable:
 
 | resident, native | GiB |
@@ -200,8 +200,8 @@ viable for all four runtimes, and it makes the 20 GiB model comfortable:
 | game client | ~2, **to be measured in Slice 1** |
 | **total** | **~28-30 of 32** |
 
-Native is what makes this table fit at all: no Hyper-V balloon, no "WSL2 defaults to 50% of RAM =
-16 GB" trap, no `.wslconfig` to remember, no second page-cache layer, and no 20 GiB of model living
+Native is what makes this table fit at all: no hypervisor balloon, no "defaults to 50% of RAM =
+16 GB" trap inherited from a VM layer, no second page-cache, and no 20 GiB of model living
 inside a VM that Windows can trim under pressure. Keep `--mmap` (llama.cpp default) so the NTFS cache
 absorbs pressure instead of the process dying mid-round, and leave the pagefile system-managed on C:.
 
@@ -323,7 +323,7 @@ Start-Process -FilePath 'C:\dm\bin\llama\llama-server.exe' -WindowStyle Hidden -
 #   presence/repeat penalty off. Use temp <= 0.35 for the mutations-only phase if split.
 ```
 
-Windows-specific obligations that replace the old `.wslconfig` bullet:
+Windows-specific obligations that replace the old memory-ceiling bullet:
 
 - **Antimalware exclusion** for the model dir, the asset cache and the tracker DB
   (`Add-MpPreference -ExclusionPath`, admin). Without it, a 20 GiB mmap'd file and every PNG ComfyUI
@@ -361,11 +361,11 @@ Flags to re-verify against the pinned build (`llama-server --version`, record in
 | Round loop / Prompt contract | add: thinking off, `json_schema`-forced key order, template vendored+hashed, retry-warning behaviour, deterministic tool serialization. |
 | Voice page | bark bank now covers a *shorter* gap once thinking is off (state both numbers); narration tok/s budget unchanged, still audio-bound. |
 | Risks | add: hybrid DeltaNet prefix-cache reuse unverified; MTP head transplanted from a different quant of the unrepaired base (acceptance unknown); MXFP4 CPU path young; template drift across repo updates (pin by commit SHA — this repo's files do get replaced); over-compliance of an uncensored model makes the tracker gate load-bearing; game client RAM vs `memory=28GB`. |
-| Memory budgets | GiB everywhere; weights 20.06 GiB; **delete the `.wslconfig` callout entirely**; replace with the native budget table in section 3, client RAM measured in Slice 1. |
-| Environment page | rewrite as native Windows x64: pinned binaries table (section 6), no "Ubuntu under WSL2 for all builds", no "build llama.cpp from source in WSL2"; the Ada/`sm_89` note survives and is now easier (win-vulkan / win-cuda builds exist) |
-| Four-runtimes table | "Runs on" column: `CPU, WSL2` -> `CPU, native Windows` for llama-server and audio.cpp; `GPU bursts, WSL2` -> `GPU bursts, native Windows` for ComfyUI |
+| Memory budgets | GiB everywhere; weights 20.06 GiB; **delete the VM memory-ceiling callout entirely**; replace with the native budget table in section 3, client RAM measured in Slice 1. |
+| Environment page | rewrite as native Windows x64: pinned binaries table (section 6), no "Ubuntu for all builds", no "build llama.cpp from source in a Linux layer"; the Ada/`sm_89` note survives and is now easier (win-vulkan / win-cuda builds exist) |
+| Four-runtimes table | "Runs on" column: `CPU, <old layer>` -> `CPU, native Windows` for llama-server and audio.cpp; `GPU bursts, <old layer>` -> `GPU bursts, native Windows` for ComfyUI |
 | Process layout | "Start" column: systemd/session start -> one PowerShell launcher (or Task Scheduler) that starts all four, keeps the machine awake, and puts the children in a Job Object so they die together |
-| First-run checklist | drop "confirm WSL2 reports the configured memory"; add: Defender exclusion on/off timing, REPACK/SIMD line from the server log, sleep/hibernate disabled, tracker DB + asset cache outside OneDrive, disk free-space check. Then the seven probes A-G in `notes/bench_dm.ps1`, including `--spec-synth-len` (synthetic acceptance) to measure the MTP ceiling separately from the head's acceptance rate. |
+| First-run checklist | drop the VM memory check; add: Defender exclusion on/off timing, REPACK/SIMD line from the server log, sleep/hibernate disabled, tracker DB + asset cache outside OneDrive, disk free-space check. Then the seven probes A-G in `notes/bench_dm.ps1`, including `--spec-synth-len` (synthetic acceptance) to measure the MTP ceiling separately from the head's acceptance rate. |
 | Risks | add: OneDrive hydrating/dehydrating model and asset files (it also uploads them); DWM reserving ~0.5-1 GiB of the 8 GB card while Anima wants 5.6; WDDM spill to system RAM stalling an Anima burst; single 1 TB disk at 90% full; Windows Update / Modern Standby interrupting a session. |
 | Open decisions | add: MXFP4 vs DIY Q4_K_S dense; MTP on/off as a runtime A/B switch (one 898 MB flag day, keep the non-MTP file as control); art-grounded narration via mmproj (vision) as a post-slice-4 idea. |
 
@@ -393,8 +393,8 @@ Flags to re-verify against the pinned build (`llama-server --version`, record in
    defaults are thinking on and preserved, which is tens of seconds of dead air per round.
 4. Turn contract: `resolve_round` emitted under `response_format: json_schema` so key order is enforced
    by the grammar, with the vendored `notes/chat_template.jinja` passed explicitly and hashed.
-5. **Native Windows only. Nothing on WSL2 or Linux.** Pi, llama-server, audio.cpp and ComfyUI all have
-   official Windows x64 artifacts (verified), so the doc's WSL2 pages get deleted, not annotated.
+5. **Native Windows x64 only. Nothing on Linux.** Pi, llama-server, audio.cpp and ComfyUI all have
+   official Windows x64 artifacts (verified), so the doc's Linux pages get deleted, not annotated.
 6. Never download the repo (131 GB). Pull one file, pinned by commit SHA: this repo's files do get
    replaced under the same names (last modified today).
 7. The doc's vendor capability scores are base-model numbers; tool-call reliability gets measured on

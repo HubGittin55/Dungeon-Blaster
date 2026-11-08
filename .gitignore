@@ -1,2 +1,16 @@
-notes/__pycache__/
+# Local-only. This repo is public; these stay on the laptop.
+#   - the architecture PDF is the design source of truth and Blarmo holds the copy (his README says so)
+#   - the desktop screenshot is a screenshot of somebody's desktop
+#   - the vendor metadata dumps are 1.6 MB of HuggingFace API echo
+*.pdf
+*.png
+*.jpg
+notes/hf_api.json
+notes/hf_tree.json
+notes/type_enum.json
+
+saves/
+journal/
 *.pyc
+__pycache__/
+.DS_Store

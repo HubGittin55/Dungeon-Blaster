@@ -1,0 +1,79 @@
+{
+ "at": "2026-11-08T15:08:52.031486",
+ "power": "Turbo",
+ "size": 16000,
+ "cases": [
+  {
+   "ttft": 150.323,
+   "total": 151.275,
+   "ptok": 14845,
+   "ctok": 12,
+   "eval_rate": 99,
+   "case": "cold"
+  },
+  {
+   "ttft": 0.28,
+   "total": 1.238,
+   "ptok": 14845,
+   "ctok": 12,
+   "eval_rate": 53048,
+   "case": "warm"
+  },
+  {
+   "ttft": 0.813,
+   "total": 1.795,
+   "ptok": 14848,
+   "ctok": 12,
+   "eval_rate": 18270,
+   "case": "append_turn"
+  },
+  {
+   "ttft": 151.357,
+   "total": 152.311,
+   "ptok": 14851,
+   "ctok": 12,
+   "eval_rate": 98,
+   "case": "state_40pct"
+  },
+  {
+   "ttft": 152.001,
+   "total": 152.952,
+   "ptok": 14851,
+   "ctok": 12,
+   "eval_rate": 98,
+   "case": "state_90pct"
+  },
+  {
+   "ttft": 152.102,
+   "total": 153.062,
+   "ptok": 14846,
+   "ctok": 12,
+   "eval_rate": 98,
+   "case": "state_head"
+  },
+  {
+   "ttft": 150.886,
+   "total": 151.903,
+   "ptok": 14848,
+   "ctok": 12,
+   "eval_rate": 98,
+   "case": "idle_then_turn"
+  },
+  {
+   "ttft": 152.861,
+   "total": 153.953,
+   "ptok": 14851,
+   "ctok": 12,
+   "eval_rate": 97,
+   "case": "again_state_40"
+  },
+  {
+   "ttft": 158.862,
+   "total": 159.825,
+   "ptok": 14852,
+   "ctok": 12,
+   "eval_rate": 93,
+   "case": "again_state_40b"
+  }
+ ]
+}

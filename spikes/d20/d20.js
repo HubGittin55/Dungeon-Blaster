@@ -203,9 +203,17 @@ function buildDie(radius, atlas) {
     if (normal.dot(centroid) < 0) normal.negate();          // outward, always
     faces.push({ value: f + 1, centroid, normal });
 
-    // Map this triangle onto its atlas cell. UVs are set so the drawn glyph sits upright inside the facet.
+    // UVs, done properly. The first version handed the atlas triangle to the three vertices in index order,
+    // which has nothing to do with where those vertices actually are - so the printed number came out in an
+    // arbitrary rotation on every face and a settled 17 read upside down while the geometry swore up=17 and
+    // the self-test swore PASS. A die can satisfy the law and still lie to a human eye.
+    //
+    // Convention: vertex a is the apex, drawn at the top of the atlas cell; b bottom-left, c bottom-right.
+    // a->b->c winds counter-clockwise seen from the outward normal, and so does top->bottomLeft->bottomRight
+    // in UV space, so the mapping preserves orientation and no number is ever mirrored. The glyph now reads
+    // upright toward vertex a, the same way a moulded d20 reads toward one of its points.
     const cx = (f % cols) / cols, cy = Math.floor(f / cols) / (20 / cols);
-    const tri = [[0.5, 0.88], [0.86, 0.20], [0.14, 0.20]];  // v up: matches canvas glyph orientation
+    const tri = [[0.50, 0.90], [0.09, 0.16], [0.91, 0.16]];
     for (let k = 0; k < 3; k++) {
       uv.setXY(f * 3 + k, cx + tri[k][0] / cols, cy + tri[k][1] / (20 / cols));
     }
@@ -276,9 +284,13 @@ class RigidBody {
     this.v.y -= PHYS.g * dt;
     this.p.addScaledVector(this.v, dt);
     if (this.w.lengthSq() > 1e-9) {
-      const dq = new THREE.Quaternion(this.w.x * dt * 0.5, this.w.y * dt * 0.5, this.w.z * dt * 0.5, 0)
-        .multiply(this.q);
-      this.q.add(dq.multiplyScalar(dt)).normalize();
+      // dq/dt = 0.5 * omega_quat * q, integrated then renormalised. three.js Quaternion has no
+      // multiplyScalar, which is the second reason this file has a headless pass: the page died on frame
+      // one with a TypeError and looked exactly like a dark room.
+      const hw = 0.5 * dt;
+      const q = this.q;
+      const dq = new THREE.Quaternion().set(this.w.x * hw, this.w.y * hw, this.w.z * hw, 0).multiply(q);
+      q.set(q.x + dq.x, q.y + dq.y, q.z + dq.z, q.w + dq.w).normalize();
     }
 
     // Damping. Angular drag is what actually stops the die; without it, friction alone keeps a face
@@ -463,6 +475,8 @@ export class DiceTable {
     camera.lookAt(0, 0.34, 0);
     this.camera = camera;
     this.camBase = camera.position.clone();
+    this.camRig = new THREE.Vector3();   // damped offset that tracks the die across the table
+    this.camAim = new THREE.Vector3();   // damped offset on the look-at target
     this.camLook = new THREE.Vector3(0, 0.34, 0);
 
     // Torch: one shadowed key with a flicker, a cool fill so the shadow side is not a hole, and a bounce
@@ -511,8 +525,12 @@ export class DiceTable {
     this._running = true;
     this._fps = 60;
 
-    this._loop = this._loop.bind(this);
-    if (!opts.manual) requestAnimationFrame(this._loop);
+    // quiet = simulate without drawing. The self-test runs 30 rolls headlessly and asserts the die lands on
+    // the face the tracker announced; drawing 4000 frames first would only make it slower to say no.
+    this.quiet = !!opts.quiet;
+    this._frame = this._frame.bind(this);
+    if (!opts.manual && !opts.quiet) requestAnimationFrame(this._frame);
+    if (opts.manual && !this.opt.autoStart) { /* driven by step()/advance() from here on */ }
     window.addEventListener('resize', () => this.resize());
   }
 
@@ -566,10 +584,19 @@ export class DiceTable {
   _beginEase() {
     const q = this.body.q;
     const upVal = this.upFace();
-    // Rotate whatever is currently up onto +Y, applied in world space: minimal rotation, so if the die
-    // already settled on the announced face this is a no-op and nobody sees a thing.
-    const upNormal = this.die.faces.find(f => f.value === upVal).normal.clone().applyQuaternion(q).normalize();
-    const fix = new THREE.Quaternion().setFromUnitVectors(upNormal, UP);
+    // THE WHOLE LAW LIVES ON THESE LINES, so here is what they used to do instead: they rotated the face that
+    // was ALREADY up onto +Y. That is a no-op dressed as a correction, and the self-test caught it - 21 of 25
+    // rolls showed some other number while the code reported success. The face that must end up pointing at
+    // the sky is the one the tracker announced, whatever the physics happened to land on.
+    //
+    // setFromUnitVectors gives the minimal world-space rotation taking the announced normal onto +Y, and q' =
+    // fix * q applies it without disturbing the die's resting position. If the die already shows the right
+    // face the angle is ~0 and nobody sees a thing; if it landed on 3 and was told 17 the die visibly turns
+    // over, which is why the dust and the slow-mo dip exist. The better long-run answer is to seed the throw
+    // so the natural resting face usually IS the announced one, and treat the ease as the exception.
+    const announced = this.die.faces.find((f) => f.value === this.target);
+    const faceNormal = announced.normal.clone().applyQuaternion(q).normalize();
+    const fix = new THREE.Quaternion().setFromUnitVectors(faceNormal, UP);
     // A yaw flourish so the ease reads as "settling" rather than "snapping": spin about Y while the face
     // tips up. Same endpoint, more motion to look at.
     const yaw = new THREE.Quaternion().setFromAxisAngle(UP, (Math.random() - 0.5) * 0.7);
@@ -586,17 +613,34 @@ export class DiceTable {
     const ms = this.pending ? performance.now() - this.pending.t0 : 0;
     this.state = 'settled';
     this.landed = landed;
-    this.onStage('landed', { value: this.target, landed, ms: Math.round(ms), seed: this.seed, agree: landed === this.target });
+    // One payload, all the truth, for both the promise and the callback. The HUD and the self-test used to
+    // read `target` and `sim_s` from an object that only had `value` and `ms`, which made a perfectly good
+    // die print "*** DISAGREEMENT ***" for every roll - a law violation that was really a missing key.
+    const outcome = { value: this.target, target: this.target, landed, agree: landed === this.target,
+                      ms: Math.round(ms), sim_s: +this.rollT.toFixed(2), seed: this.seed };
+    this.onStage('landed', outcome);
     const p = this.pending; this.pending = null;
-    if (p) p.resolve({ landed, target: this.target, ms: Math.round(ms), agree: landed === this.target, seed: this.seed });
+    if (p) p.resolve(outcome);
   }
 
-  _loop() {
+  _frame() {
     if (!this._running) return;
     const now = performance.now();
-    let dt = Math.min(0.05, (now - this._clock.t) / 1000);
+    const dt = Math.min(0.05, (now - this._clock.t) / 1000);
     this._clock.t = now;
     this._fps = this._fps * 0.92 + (dt > 0 ? 1 / dt : 60) * 0.08;
+    this.step(dt);
+    requestAnimationFrame(this._frame);
+  }
+
+  // One fixed unit of the whole machine: physics, the ease, fx, camera, one draw. _frame supplies dt from
+  // the clock; the self-test supplies its own and never touches the renderer. Same code path either way,
+  // which is the only reason a headless pass means anything about what the couch sees.
+  step(dt) {
+    // `now` used to live in the animation loop. When the body moved into step() the self-test's first
+    // simulated frame died on ReferenceError and the page just sat there looking like a dark room - which is
+    // how I learned the difference between code that parses and code that runs.
+    const now = performance.now();
 
     // Torch flicker: two sines at awkward frequencies so it never visibly cycles.
     this.key.intensity = this.keyBase * (0.9 + 0.055 * Math.sin(now / 91) + 0.035 * Math.sin(now / 37.3));
@@ -640,32 +684,44 @@ export class DiceTable {
     this.dust.step(dt);
     this.rings.step(dt);
 
+    // Damped lateral follow. The die skitters roughly 1.4 m and the frame is only so wide: the settled
+    // capture caught it leaving shot at the exact moment the number mattered. The camera leans toward it
+    // (55%) rather than chasing it (100%), so the table still reads as a place instead of a tracking shot.
+    const engaged = this.state === 'idle' ? 0 : 1;
+    this.camBase.x += (this.body.p.x * 0.55 * engaged - this.camBase.x) * Math.min(1, dt * 2.4);
+    this.camLook.x += (this.body.p.x * 0.9 * engaged - this.camLook.x) * Math.min(1, dt * 3.0);
+
+    // Track rig. The die leaves the throw line in whatever direction the seed likes; a fixed camera either
+    // cropped it at the frame edge or let it roll clean out of shot, and the settled capture showed exactly
+    // that. The camera takes about half the travel and the aim takes most of it, so the die stays framed
+    // while the table still moves under it.
+    const eng = this.state === 'idle' ? 0 : 1;
+    const px = this.body.p.x, pz = this.body.p.z;
+    this.camRig.x += (px * 0.5 * eng - this.camRig.x) * Math.min(1, dt * 2.4);
+    this.camRig.z += (pz * 0.45 * eng - this.camRig.z) * Math.min(1, dt * 2.4);
+    this.camAim.x += (px * 0.85 * eng - this.camAim.x) * Math.min(1, dt * 3.0);
+    this.camAim.z += (pz * 0.75 * eng - this.camAim.z) * Math.min(1, dt * 3.0);
+
     this.shake *= Math.max(0, 1 - dt * 7);
     this.camera.position.set(
-      this.camBase.x + (Math.random() - 0.5) * this.shake,
+      this.camBase.x + this.camRig.x + (Math.random() - 0.5) * this.shake,
       this.camBase.y + (Math.random() - 0.5) * this.shake,
-      this.camBase.z + (Math.random() - 0.5) * this.shake * 0.6
+      this.camBase.z + this.camRig.z + (Math.random() - 0.5) * this.shake * 0.6
     );
-    this.camera.lookAt(this.camLook);
+    this.camera.lookAt(this.camLook.x + this.camAim.x, this.camLook.y, this.camLook.z + this.camAim.z);
 
-    this.renderer.render(this.scene, this.camera);
-    requestAnimationFrame(this._loop);
+    if (!this.quiet) this.renderer.render(this.scene, this.camera);
   }
 
-  // Headless capture helper: advance deterministic fixed steps, render one frame, no rAF needed.
-  advance(seconds, fixed = 1 / 60) {
-    const verts = this.die.localVerts;
+  // Deterministic fixed-step pump for capture and for the self-test. Returns when the promise from roll()
+  // resolves or the budget runs out, whichever is louder.
+  pump(seconds, fixed = 1 / 60) {
     const n = Math.round(seconds / fixed);
-    for (let i = 0; i < n * PHYS.substeps; i++) {
-      this.body.step(fixed / PHYS.substeps, verts, (speed, x, z) => {
-        this.dust.puff(x, 0.02, z, Math.min(2.4, speed * 0.16));
-        this.rings.ping(x, z, Math.min(2.2, speed * 0.2));
-      });
-      this.rollT += fixed / PHYS.substeps;
+    for (let i = 0; i < n; i++) {
+      this.step(fixed);
+      if (!this.pending && this.state === 'settled') break;
     }
-    this.die.mesh.position.copy(this.body.p);
-    this.die.mesh.quaternion.copy(this.body.q);
-    this.renderer.render(this.scene, this.camera);
+    if (!this.quiet) this.renderer.render(this.scene, this.camera);
   }
 
   dispose() {

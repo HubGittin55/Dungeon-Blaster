@@ -1,0 +1,126 @@
+<!doctype html>
+<html><head><meta charset=utf-8><title>D20</title>
+<script type="importmap">{"imports":{"three":"./three.module.js"}}</script>
+<style>
+  html,body{margin:0;height:100%;background:#090705;overflow:hidden;cursor:crosshair}
+  #table{position:fixed;inset:0}
+  .vig{position:fixed;inset:0;pointer-events:none;
+       background:radial-gradient(ellipse at 50% 42%,transparent 42%,rgba(0,0,0,.66) 100%)}
+  #hud{position:fixed;left:14px;bottom:12px;font:12px/1.55 ui-monospace,Consolas,monospace;
+       color:#cbb791;text-shadow:0 1px 3px #000;white-space:pre;pointer-events:none}
+  #verdict{position:fixed;right:16px;top:12px;font:700 20px ui-monospace,Consolas,monospace;
+       color:#f2ddab;text-shadow:0 2px 6px #000;pointer-events:none;text-align:right}
+  #flash{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity .18s}
+</style></head><body>
+<div id=table></div><div class=vig></div><div id=hud></div><div id=verdict></div><div id=flash></div>
+<script>
+// Nothing may fail quietly in a spike whose whole value is being observable: a module error otherwise lands
+// only in a console that headless capture cannot show, and the page just sits there looking like a black room.
+window.__err = null;
+addEventListener('error', (e) => {
+  window.__err = String(e.message || e.error) + ' at ' + String(e.filename || '?').split('/').pop() + ':' + e.lineno + ':' + e.colno;
+  const h = document.getElementById('hud'); if (h) h.textContent = 'ERROR: ' + window.__err + '
+' + String(e.error && e.error.stack || '').split('
+').slice(0,4).join('
+');
+  document.title = 'PAGE_ERROR ' + window.__err;
+});
+addEventListener('unhandledrejection', (e) => {
+  window.__err = 'rejection: ' + String(e.reason);
+  const h = document.getElementById('hud'); if (h) h.textContent = window.__err;
+  document.title = 'PAGE_ERROR ' + window.__err;
+});
+</script>
+<script type=module>
+import { DiceTable } from './d20.js';
+const Q = new URLSearchParams(location.search);
+const hud = document.getElementById('hud'), verdict = document.getElementById('verdict'), flashEl = document.getElementById('flash');
+const selftest = Q.has('selftest');
+const shotAt   = Q.has('shot') ? parseFloat(Q.get('shot')) : null;
+
+function flash(txt, color){ verdict.textContent = txt; verdict.style.color = color;
+  flashEl.style.background = 'radial-gradient(circle at 50% 50%, ' + color + '33, transparent 70%)';
+  flashEl.style.opacity = 1; setTimeout(()=>{ flashEl.style.opacity = 0; }, 260); }
+
+// A d20 thud, synthesised: filtered noise burst whose pitch and level follow impact speed. No audio files,
+// and it is created on first gesture so no browser gets to complain about autoplay.
+let actx = null;
+function thud(speed){
+  if (!actx || actx.state === 'closed') return;
+  const n = Math.min(1, speed / 14), dur = 0.09 + n * 0.13;
+  const buf = actx.createBuffer(1, Math.max(32, actx.sampleRate * dur | 0), actx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++){ const k = 1 - i / d.length; d[i] = (Math.random()*2-1) * k * k * k; }
+  const src = actx.createBufferSource(); src.buffer = buf;
+  const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 180 + n * 1500; lp.Q.value = 1.2;
+  const g = actx.createGain(); g.gain.value = 0.05 + n * 0.5;
+  src.connect(lp); lp.connect(g); g.connect(actx.destination); src.start();
+}
+
+let first = true;
+async function armAudio(){ if (first){ first = false; try { actx = new (window.AudioContext||window.webkitAudioContext)(); } catch {} } }
+
+const table = new DiceTable(document.getElementById('table'), {
+  quiet: selftest,
+  onStage: (stage, info) => {
+    if (stage === 'throw') { window.__last = null; hud.textContent = 'rolling a ' + info.value + '  (seed ' + info.seed + ')'; }
+    if (stage === 'landed') {
+      hud.textContent = `tracker said ${info.target}   die shows ${info.landed}   ${info.agree ? 'AGREE' : '*** DISAGREEMENT ***'}   ${info.sim_s}s`;
+      window.__last = info;
+      if (info.value === 20) flash('NAT 20', '#ffd76a');
+      else if (info.value === 1) flash('NAT 1', '#ff5a4a');
+      else flash('', '#f2ddab');
+    }
+  },
+  onImpact: (s) => thud(s),
+});
+window.D20 = table;
+window.__done = null;
+
+// ---- THE LAW, TESTED. The tracker says the number; the die may only show it. Twenty-five rolls, including
+// a repeat of the same face under different seeds, all asserted. A build where physics gets to vote on the
+// result must fail this page loudly, in the title, where a screenshot of it cannot hide it.
+if (selftest) {
+  const vals = [];
+  for (let v = 1; v <= 20; v++) vals.push(v);
+  vals.push(7, 7, 13, 20, 1);
+  const fails = []; const sims = [];
+  for (let i = 0; i < vals.length; i++) {
+    const v = vals[i], seed = 1000 + i * 7919;
+    // read by the synchronous 'landed' stage callback, because a promise .then() cannot run inside this
+    // loop - microtasks wait for the call stack to empty, and a test that cannot see the result reports
+    // "never settled" for 25 rolls that all settled fine. Ask the state machine directly, not the queue.
+    window.__last = null;
+    table.roll({ value: v, seed });
+    table.pump(8);
+    const done = window.__last;
+    if (!done) { fails.push({ v, seed, landed: null, why: 'never settled (state=' + table.state + ' rollT=' + table.rollT.toFixed(2) + ')' }); continue; }
+    sims.push(done.sim_s);
+    if (!done.agree || done.landed !== v) fails.push({ v, seed, landed: done.landed });
+  }
+  const pass = fails.length === 0;
+  document.title = pass ? `SELFTEST PASS ${vals.length}/${vals.length}` : `SELFTEST FAIL ${fails.length}/${vals.length}`;
+  const worst = sims.length ? Math.max(...sims).toFixed(2) : '-';
+  const med = sims.length ? sims.slice().sort((a,b)=>a-b)[sims.length>>1].toFixed(2) : '-';
+  hud.textContent = `${document.title}
+settle time  median ${med}s  worst ${worst}s
+mismatches: ${fails.length ? JSON.stringify(fails) : 'none'}
+physics never decides the number - the tracker does, and the die is eased onto it`;
+  window.__done = { pass, fails, sims };
+} else if (shotAt !== null) {
+  // Deterministic single frame for capture: same seed, same frame, no rAF, no clock.
+  const v = parseInt(Q.get('value') || '17', 10), seed = parseInt(Q.get('seed') || '4242', 10);
+  let done = null; table.roll({ value: v, seed }).then(r => { done = r; });
+  table.pump(shotAt);
+  document.title = `SHOT t=${shotAt} v=${v} state=${table.state} up=${table.upFace()}`;
+  hud.textContent = document.title + (done ? `  landed=${done.landed}` : '');
+  window.__done = { shotAt, v, state: table.state };
+} else {
+  hud.textContent = 'click or SPACE to roll   (audio needs the click)';
+  const go = async () => { await armAudio(); if (table.state === 'idle' || table.state === 'settled') table.roll({ value: 1 + Math.floor(Math.random()*20), seed: (Math.random()*1e9)|0 }); };
+  addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); go(); } });
+  addEventListener('click', go);
+  (function fps(){ hud.textContent += `\n${Math.round(table._fps)} fps`; requestAnimationFrame(fps); })();
+  if (Q.get('auto') === '1') go();
+}
+</script></body></html>

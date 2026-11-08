@@ -1,0 +1,11 @@
+{
+  "name": "dungeon-blaster",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Voice-driven LLM-run tabletop RPG: deterministic tracker, gate, and pi game master extension",
+  "scripts": {
+    "test": "node test/gate_test.js"
+  },
+  "engines": { "node": ">=20" }
+}

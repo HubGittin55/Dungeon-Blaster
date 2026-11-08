@@ -120,6 +120,86 @@ function Find-Target {
 $RolePattern = '^(?<role>User|Assistant)\s+message:\s*(?<text>[\s\S]*)$'
 function Strip-Tag([string]$x) { return ("$x" -replace '^\s*\[Qwenny via Pi\]\s*', '') }
 
+# A message row is NOT a bag of Text nodes, which is the whole reason a review came back unreadable.
+# Markdown lists arrive as ListItem elements whose accessible name carries the marker and the body together
+# ("1. On github.com, go to Settings, ..."), while the ::marker pseudo-element shows up separately as a Text
+# node holding nothing but "1.". Harvesting Text alone therefore returns the numbers of a numbered list and
+# throws away the instructions - which is exactly how "Must-fix: 1. <thing that matters> 2. <thing that
+# matters>" reached me as two digits and a feeling of being gaslit by a chat client.
+#
+# So: collect every named descendant of a control type that carries words, then drop any name fully contained
+# in another, because UIA repeats a parent's text in its children and without that dedup every message comes
+# back two or three times over. Containment is by strictly-greater length, so two messages that both say
+# a 1-character thing (a thumbs up, once) are not deduped into one.
+function Get-RowNames($row) {
+  $named = New-Object System.Collections.ArrayList
+  foreach ($e in $row.FindAll($SD, [System.Windows.Automation.Condition]::TrueCondition)) {
+    $n = ([string]$e.Current.Name).Trim()
+    if ($n -eq '') { continue }
+    if ($e.Current.ControlType.ProgrammaticName -notmatch 'Text|ListItem|Hyperlink|Edit|Custom') { continue }
+    [void]$named.Add($n)
+  }
+  # Drop any name fully contained in a longer one: UIA repeats a parent's text in its children, and without
+  # this every message arrives two or three times. Strictly-greater length means two identical short
+  # statements (two thumbs-up chips, once) are both kept.
+  $keep = New-Object System.Collections.ArrayList
+  for ($i = 0; $i -lt $named.Count; $i++) {
+    $dup = $false
+    for ($j = 0; $j -lt $named.Count; $j++) {
+      if ($i -eq $j) { continue }
+      if ($named[$j].Length -gt $named[$i].Length -and $named[$j].Contains($named[$i])) { $dup = $true; break }
+    }
+    if (-not $dup) { [void]$keep.Add($named[$i]) }
+  }
+  $out = @()
+  foreach ($k in $keep) { $out += [string]$k }
+  return $out
+}
+
+# The blindness detector. With the harvest above, a list item whose body is present never shows up as a bare
+# marker (the marker is contained in the body and gets deduped). A bare marker that survives therefore means
+# the body is MISSING from the tree: a list with numbers and no content. That state used to be silent.
+function Test-NakedMarkers($names) {
+  $naked = 0
+  foreach ($n in $names) {
+    if ($n -cmatch '^\s*(\d+[.)]|[-*•])\s*$') {
+      $has = $false
+      foreach ($o in $names) { if ($o -ne $n -and $o.Length -gt $n.Length -and $o.StartsWith($n)) { $has = $true; break } }
+      if (-not $has) { $naked++ }
+    }
+  }
+  return $naked
+}
+
+# Is the accessibility tree even up? Firefox only maintains it for the SELECTED tab: with any other tab in
+# front, every row collapses to a 1x1 stub with no Text descendants and the ListItems go to zero. A read in
+# that state returns a confident, plausible, EMPTY transcript, which is worse than an error - the AFK loop
+# would poll, see nothing new, and call that idle. Both conditions are checked because both have happened
+# while this file was being written.
+function Test-TreeHealth($t) {
+  $title = ''
+  try { $title = [string]$t.window.Current.Name } catch { }
+  if (-not $title) {
+    # Same trap as the send path: UIA's window Name came back empty with a perfectly healthy tree, which
+    # would have turned this into a refusal to read at all. Win32 window text is the ground truth.
+    $sb = New-Object System.Text.StringBuilder 512
+    [void][Native.Win32]::GetWindowText($t.hwnd, $sb, 512)
+    $title = $sb.ToString()
+  }
+  $rows = @($t.msgs.FindAll($SC, (Cond $AE::ControlTypeProperty $CT::Group)))
+  $textNodes = @($t.msgs.FindAll($SD, (Cond $AE::ControlTypeProperty $CT::Text))).Count
+  $lis = @($t.msgs.FindAll($SD, (Cond $AE::ControlTypeProperty $CT::ListItem))).Count
+  $stale = ($rows.Count -gt 8 -and $textNodes -lt 10)
+  # Note what is NOT a refusal condition: the tab being in front. Reads of a background Muse tab were proven
+  # to work repeatedly today, and a check that fails when things are fine is worse than no check - it teaches
+  # everyone to pass --Force. Teardown is the only state where a read is provably meaningless, so teardown is
+  # the only thing that stops a read. tab_selected stays in the report as information.
+  [ordered]@{
+    tab_selected = ($title -match 'Stunkus'); rows = $rows.Count; text_nodes = $textNodes
+    list_items = $lis; stale = [bool]$stale; title = $title
+  }
+}
+
 function Read-Transcript($t, $take) {
   # One row under "Chat messages" is one message bubble, paragraphs and all (measured: his 3-paragraph reply
   # is a single row of 6 Text nodes; the PI: test is a row of 2). So group by row - walking Text nodes one by
@@ -137,7 +217,8 @@ function Read-Transcript($t, $take) {
   if (-not $rows.Count) { return @() }
   $out = @()
   foreach ($row in $rows) {
-    $names = @($row.FindAll($SD, (Cond $AE::ControlTypeProperty $CT::Text)) | ForEach-Object { ([string]$_.Current.Name).Trim() } | Where-Object { $_ -ne '' })
+    $names = @(Get-RowNames $row)
+    $naked = Test-NakedMarkers $names
     $names = @($names | Where-Object { $_ -notmatch '^(You|Stunkus|Blarmo):$' -and $_ -notmatch '^\d{1,2}:\d{2}(:\d{2})?\s*([AP]M|am|pm)?$' -and $_ -notmatch '^[A-Z][a-z]{2} \d{1,2}$' })
     if (-not $names.Count) { continue }
     if (-not $names.Count) { continue }
@@ -156,7 +237,10 @@ function Read-Transcript($t, $take) {
     }
     if ([string]::IsNullOrWhiteSpace($body)) { continue }
     $body = $body.Trim()
-    $out += [ordered]@{ role = $role; text = $body; hash = (Hash12 $body); chars = $body.Length }
+    $out += [ordered]@{ role = $role; text = $body; hash = (Hash12 $body); chars = $body.Length;
+                        # truncated now means something specific and checkable: this row contains a list
+                        # marker whose content never arrived. Not "I felt like it was cut off".
+                        truncated = ($naked -gt 0); naked_markers = $naked }
   }
   if ($take -gt 0 -and $out.Count -gt $take) { $out = @($out | Select-Object -Last $take) }
   return $out
@@ -265,8 +349,20 @@ switch ($Verb) {
     break
   }
 
+  'health' {
+    ConvertTo-Json (Test-TreeHealth $target) -Depth 3
+    break
+  }
+
   'peek' {
     $n = if ($Arg1) { [int]$Arg1 } else { 6 }
+    $health = Test-TreeHealth $target
+    if ($health.stale) {
+      Write-Error ("STALE_TREE: rows={0} textNodes={1} listItems={2} tabSelected={3} title='{4}'" -f `
+        $health.rows, $health.text_nodes, $health.list_items, $health.tab_selected, $health.title)
+      Write-Error '         Firefox only keeps the accessibility tree for the selected tab. Bring the Stunkus tab to the front and retry; nothing was answered from this read.'
+      exit 7
+    }
     $msgs = Read-Transcript $target $n
     if ($Role) { $msgs = @($msgs | Where-Object { $_.role -eq $Role }) }
     # The PI: protocol: only turns he opens with PI: are answerable, and never one of ours.
@@ -278,8 +374,10 @@ switch ($Verb) {
     $out = @()
     foreach ($m in $msgs) {
       $mask = if ($AllowSecrets) { [pscustomobject]@{ text = $m.text; hits = @() } } else { Mask-Secrets $m.text }
-      $out += [ordered]@{ role = $m.role; hash = $m.hash; chars = $m.chars; masked = (@($mask.hits).Count -gt 0); text = $mask.text }
-      Log-Line ([ordered]@{ dir = 'in'; hash = $m.hash; chars = $m.chars; masked = (@($mask.hits).Count -gt 0) })
+      $out += [ordered]@{ role = $m.role; hash = $m.hash; chars = $m.chars; masked = (@($mask.hits).Count -gt 0);
+                          truncated = [bool]$m.truncated; naked_markers = [int]$m.naked_markers; text = $mask.text }
+      Log-Line ([ordered]@{ dir = 'in'; hash = $m.hash; chars = $m.chars; masked = (@($mask.hits).Count -gt 0);
+                            naked = [int]$m.naked_markers })
     }
     ConvertTo-Json $out -Depth 4
     break

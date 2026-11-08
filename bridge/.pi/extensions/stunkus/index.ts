@@ -211,9 +211,24 @@ export default function (pi) {
       if (p.action === 'shot') return txt(describe(await runCli('shot', [], 60_000)));
       if (p.action === 'read') {
         const r = await runCli('peek', [String(p.tail || 6)], 90_000);
-        const msgs = parsePeek(r.text).map((m) => `[${m.role}${m.masked ? ' masked' : ''}] ${m.text}`);
+        const parsed = parsePeek(r.text);
+        // null means the read FAILED, and the CLI now says so out loud: exit 7 with STALE_TREE on stderr when
+        // Firefox has torn the accessibility tree down because another tab is in front. Collapsing that into
+        // "no messages" is the exact lie this poller exists to avoid - a broken reader and a quiet thread are
+        // indistinguishable unless somebody says which one happened. The .map that used to sit on this line
+        // threw a TypeError instead, which is how Stunkus found it.
+        if (parsed === null) {
+          const why = String(r.stderr || r.text || 'no json').trim().slice(0, 400);
+          return txt('READ_FAILED: ' + why +
+            '\n  If it says STALE_TREE, the Muse tab is not the selected tab in Firefox, so its accessibility tree does not exist. Bring it to the front and retry.');
+        }
+        // LIST-INCOMPLETE is the reader's own blindness flag: this row has a list marker and no list body.
+        // That is how a review arrived as "Must-fix: 1. 2." with both instructions missing.
+        const msgs = parsed.map((m) => '[' + m.role + (m.masked ? ' masked' : '') +
+          (m.truncated ? ' LIST-INCOMPLETE:' + (m.naked_markers ?? '?') : '') + '] ' + m.text);
         return txt(msgs.join('\n\n') || describe(r));
       }
+
       if (p.action === 'send') {
         if (!p.text) return txt('send needs text');
         if (existsSync(PAUSE)) return txt('PAUSED: delete journal/PAUSE before sending');

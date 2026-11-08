@@ -223,6 +223,15 @@ t('strict round with one bad mutation commits nothing and speaks nothing', () =>
   assert.equal(Object.keys(g.items).length, 0);
   assert.equal(g.characters[1].materials.wood, 6, 'the good craft must not half-apply');
 });
+t('a fallback round speaks NOTHING - the gate does not talk itself out of its own rule', () => {
+  const g = fresh();
+  setIntents(g, intents([1, 'a club and a lie']));
+  const bad = craft('m2', 1, 'i1', C('Ghost blade', 'weapon', [{ name: 'voidglass', qty: 2 }, { name: 'sinew', qty: 1 }]));
+  const r = resolveRound(g, { narration: 'You forge the Ghost blade of legend.', mutations: [craft('m1', 1, 'i1', woodClub()), bad] }, { mode: 'fallback' });
+  assert.equal(r.committed.length, 1, 'the valid half still commits');
+  assert.equal(r.turn_log.narration, null, 'a fallback sentence promises the round that was proposed, not the one that happened');
+  assert.equal(r.turn_log.narration_blocked, 'fallback_voices_only_what_was_verified');
+});
 t('fallback commits the valid subset and drops the invalid', () => {
   const g = fresh();
   setIntents(g, intents([1, 'a club and a lie']));

@@ -160,7 +160,13 @@ export function resolveRound(g, call, { mode = 'strict', rules_refs = [] } = {})
     rejected: ctx.rejected,
     committed: committed.map((c) => c.id),
     state_diff: ctx.diffs,
-    narration: clean || mode === 'fallback' ? call.narration : null,
+    // The sentence the model wrote describes the round it PROPOSED. In fallback the committed subset is
+    // smaller than what was promised, so that sentence can claim things that never happened - and a spoken
+    // lie cannot be un-spoken. The gate buffers narration for exactly this reason, so releasing it here was
+    // the gate talking itself out of its own rule. Fallback commits quietly and the caller barks.
+    narration: clean ? call.narration : null,
+    narration_blocked: clean ? null
+      : (mode === 'fallback' ? 'fallback_voices_only_what_was_verified' : 'round_rejected'),
   };
   if (mode === 'strict' && !clean) {
     // A failed strict attempt is logged but commits nothing; the retry or fallback follows.

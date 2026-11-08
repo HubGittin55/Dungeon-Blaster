@@ -122,15 +122,37 @@ function contractNote(extra) {
  */
 async function runTurn(g, ctx, { fallback = true } = {}) {
   const intents = g.intents;
-  const ref = rulesForCall(g, []);
-  const base = [
-    { role: 'system', content: `${PERSONA}\n\n== STATE (authoritative) ==\n${stateSnapshot(g)}` },
-    { role: 'user', content: `Intentions this round:\n${intents.map((i) => `[${i.id}] slot ${i.slot}: ${i.text}`).join('\n') || '(nobody said anything)'}\n\n${contractNote()}` },
-  ];
   const needed = rulesForCall(g, [{ tool: 'craft_item' }, { tool: 'take_item' }, { tool: 'transfer_item' }, { tool: 'move_to' }, { tool: 'award_xp' }, { tool: 'introduce_npc' }]);
 
+  // PROMPT LAYOUT IS A MEASURED CONSTRAINT, NOT A TIDY-UP (notes/probe_d2_stateedit.py, 16K context on the
+  // shipping artifact): cold eval 150s, a reused turn 0.8s, and one changed digit ANYWHERE inside the cached
+  // prefix costs the full 151s - worse than cold, and --cache-reuse does not rescue a deep edit. So:
+  //   1. system holds the persona only and never varies;
+  //   2. the rules block is the second message, identical for every round of a campaign;
+  //   3. everything mutable - round number, party snapshot, this round's intents - is the NEWEST message.
+  // This function used to put the party snapshot in the system message, which silently re-evaluated the
+  // whole prompt every round: paying 151s to say "the party has 4 torches now".
+  const stable = [
+    { role: 'system', content: PERSONA },
+    { role: 'user', content: `<rules>
+${needed.prompt}
+</rules>` },
+  ];
+  const mutableTail = () => ({
+    role: 'user',
+    content: `== STATE (authoritative) ==
+${stateSnapshot(g)}
+
+Intentions this round:
+${
+      intents.map((i) => `[${i.id}] slot ${i.slot}: ${i.text}`).join('
+') || '(nobody said anything)'}
+
+${contractNote()}`,
+  });
+
   let attempt = 1;
-  let messages = [...base, { role: 'user', content: `<rules>\n${needed.prompt}\n</rules>` }];
+  let messages = [...stable, mutableTail()];
   let call = null;
   let result = null;
 
@@ -148,6 +170,8 @@ async function runTurn(g, ctx, { fallback = true } = {}) {
     // Reject loudly, then give the model its errors back with the allowed values attached.
     const feedback = result.rejected.map((r) => `${r.id} ${r.code}: ${r.reason}${r.allowed ? ` allowed: ${r.allowed.join(', ')}` : ''}`).join('\n');
     ctx.ui?.notify?.(`attempt ${attempt} rejected: ${result.rejected.map((r) => `${r.code}(${r.id})`).join(', ')}`, 'warn');
+    // Appended AFTER the mutable tail. Rewriting anything already in the prefix is a 151s re-eval wearing
+    // the mask of an error message, so the correction is a new turn like any other.
     messages = [...messages, { role: 'assistant', content: JSON.stringify(call) }, { role: 'user', content: `The tracker rejected this round:\n${feedback}\n\n${contractNote('Fix only what was rejected. Narration must match what actually happens.')}`}];
     attempt += 1;
   }
@@ -160,6 +184,22 @@ async function runTurn(g, ctx, { fallback = true } = {}) {
   }
   return { call, result, rules_refs: needed.refs };
 }
+
+/**
+ * Barks: lines that cannot be wrong. When the gate withholds narration it is not offering a gap in the
+ * audio, it is refusing to state a fact it did not verify - so the replacement has to be pure atmosphere.
+ * Anything with a noun and a verb in it could contradict the tracker, which is the whole thing being gated.
+ */
+const BARK_PARTIAL = [
+  'The dust settles, and not all of it settles where it was promised.',
+  'Something happens. Somewhat less than something happens.',
+  'The moment lands, scuffed at the edges.',
+];
+const BARK_NOTHING = [
+  'Nothing happens.',
+  'The table waits.',
+  'Silence, of the unhelpful kind.',
+];
 
 /** Voice is not Slice 1, but the seam has to exist now or it will be welded shut later. */
 function speak(text) {
@@ -318,6 +358,14 @@ export default function (pi) {
         for (const d of result.diffs || []) ctx.ui.notify(`  ${d}`, 'info');
         if (result.rejected?.length) ctx.ui.notify(`still rejected after fallback: ${result.rejected.map((x) => `${x.code}(${x.id})`).join(', ')}`, 'warn');
         const narration = result.turn_log?.narration;
+        // The engine releases narration only for a round it accepted whole. A fallback round commits a
+        // subset, so its sentence describes things that did not happen - and spoken lies cannot be
+        // un-spoken. Bark instead: atmosphere is allowed, fabricated facts are not.
+        if (!narration) {
+          const bank = result.turn_log?.mode === 'fallback' ? BARK_PARTIAL : BARK_NOTHING;
+          ctx.ui.notify(`narration withheld (${result.turn_log?.narration_blocked || 'rejected'}); barking`, 'warn');
+          speak(bank[Math.floor(Math.random() * bank.length)]);
+        }
         if (narration) {
           await pi.sendMessage({ customType: 'dm-narration', content: narration, display: true, details: { round: game.round } }, { triggerTurn: false });
           speak(narration);

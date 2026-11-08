@@ -148,6 +148,23 @@ function Invoke-AfkTurn($s, $m) {
   return $code
 }
 
+# A deferred question is a ledger, not a log line: closing one appends a closure row naming the hash it
+# closes, so the queue stays append-only and "answered=2 deferred=1" can never silently lose a question.
+function Step-Field($row, [string]$primary, [string]$fallback) {
+  $v = $row.$primary
+  if ([string]::IsNullOrWhiteSpace('' + $v)) { $v = $row.$fallback }
+  if ([string]::IsNullOrWhiteSpace('' + $v)) { return '(unstated)' }
+  return '' + $v
+}
+function Open-Deferred($rows) {
+  $closed = @($rows | Where-Object { $_.PSObject.Properties.Name -contains 'closes' } | ForEach-Object { '' + $_.closes })
+  @(($rows | Where-Object { $_.PSObject.Properties.Name -notcontains 'closes' }) |
+    Where-Object { $closed -notcontains ('' + $_.hash) })
+}
+function Get-OpenDeferredCount {
+  $rows = @(Get-Content $Defer -EA 0 | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json })
+  return @(Open-Deferred $rows).Count
+}
 # ---------------------------------------------------------------- verbs
 switch ($Verb) {
   'arm'   {
@@ -160,21 +177,48 @@ switch ($Verb) {
   }
   'disarm' {
     $s = Get-S; $s.afk = $false; Set-S $s
-    $n = @(Get-Content $Defer -EA 0 | Where-Object { $_ }).Count
-    Log "AFK DISARMED locally; $n deferred question(s) in $Defer"
+    $n = Get-OpenDeferredCount
+    Log "AFK DISARMED locally; $n open deferred question(s) in $Defer"
     break
+  }
+
+  # A heartbeat nobody gates on is a eulogy, not a monitor. This loop sat dead for 48 minutes with "read ok,
+  # 12 turns visible" as its final entry while every other verb went on reporting afk=True as though that
+  # still meant something. Staleness has to be something a scheduler can test, not a sentence in a log.
+  'alive' {
+    $s = Get-S
+    $limit = if ($IntervalSec -gt 0) { [int]$IntervalSec * 6 } else { 900 }
+    $age = if ($s.last_read) { [int]((Get-Date) - [DateTime]$s.last_read).TotalSeconds } else { -1 }
+    $pidf = Join-Path $Jrnl 'afk.pid'
+    $lpid = if (Test-Path $pidf) { ('' + (Get-Content $pidf -EA 0 | Select-Object -First 1)).Trim() } else { '' }
+    $live = [bool]($lpid -and (Get-Process -Id $lpid -EA 0))
+    if ($age -lt 0)          { Write-Output "NEVER_READ pid=$lpid"; exit 4 }
+    if (-not $live)          { Write-Output "DEAD: pid $lpid is gone; last read ${age}s ago"; exit 3 }
+    if ($age -gt $limit)     { Write-Output "STALE: pid $lpid alive but last read ${age}s ago (limit ${limit}s)"; exit 5 }
+    Write-Output "ALIVE: pid $lpid, last read ${age}s ago"; exit 0
   }
 
   'report' {
     $rows = @(Get-Content $Defer -EA 0 | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json })
+    $open = @(Open-Deferred $rows)
+    $done = $rows.Count - $open.Count
     if (-not $rows.Count) { Write-Output 'nothing deferred'; break }
-    foreach ($r in $rows) { Write-Output ("{0}  {1}`n    why: {2}" -f $r.at.Substring(0, 16).Replace('T', ' '), $r.hash, $r.why) }
+    if (-not $open.Count) { Write-Output ("nothing open ({0} closed)".Replace('{0}', $done)); break }
+    foreach ($r in $open) {
+      # .Substring on a missing `at` threw and killed the whole report verb, which is the worst possible
+      # failure for the thing whose job is to tell you what you were asked while away. Same for a row
+      # written with the wrong field names: the first narration-first entry used reason/ask instead of
+      # hash/why and would have printed a blank bullet forever.
+      $when = ('' + $r.at); if ($when.Length -ge 16) { $when = $when.Substring(0, 16).Replace('T', ' ') }
+      Write-Output ("{0}  {1}`n    why: {2}`n    ask: {3}" -f $when, ('' + $r.hash), (Step-Field $r 'why' 'reason'), (Step-Field $r 'ask' 'ask'))
+    }
+    if ($done) { Write-Output ("({0} closed)" -f $done) }
     break
   }
 
   'status' {
     $s = Get-S
-    $n = @(Get-Content $Defer -EA 0 | Where-Object { $_ }).Count
+    $n = Get-OpenDeferredCount
     $age = if ($s.last_read) { [int]((Get-Date) - [DateTime]$s.last_read).TotalSeconds } else { -1 }
     Write-Output ("afk={0} since={1} answered={2} runs={3} deferred={4}" -f $s.afk, $s.since, @(@($s.answered)).Count, @(@($s.runs)).Count, $n)
     Write-Output ("last_read={0}s ago ({1} turns visible)" -f $age, $s.last_count)

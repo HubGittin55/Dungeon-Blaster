@@ -55,6 +55,13 @@ screenshot that looks like evidence is worse than none.
    a resolution. A poller that starts mid-conversation **baselines** the thread instead of answering a `PI:`
    from half an hour ago. Auto-replies only exist inside `/stunkus_test`, which is capped at 4 replies and
    expires; the default watcher cannot send.
+   **The source of a `PI:` is not verifiable, and that is load-bearing.** UIA reports a row's *role*, never its
+   author, so a `PI:` typed from Blarmo's web session and one typed from Stunkus's tab both arrive as `role=peer`
+   with nothing in the tree to tell them apart — the sender chip is the only identity signal, and it names one of
+   the two agents, never the human. So "only `PI:` turns are answerable" really means "answerable from whichever
+   side typed it", speaker unknown. Anything that needs to know *who* sent a message — the phone-texts-the-laptop
+   flow, approvals, "Blarmo confirmed it" — cannot be built on this transport, and must not be documented as if it
+   could.
 3. **Redaction is a wall in both directions, not a politeness.** Key/token shapes, `"apiKey": "…"` JSON, AWS ids,
    private-key blocks, bearer tokens, long base64 blobs and LAN IPv4s are refused outbound (logged with the
    pattern name, `--force` is loud) and **masked inbound before they are printed or journaled**. That is not

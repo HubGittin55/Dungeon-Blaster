@@ -15,6 +15,7 @@ An LLM-driven DnD-type game: a wacky DM, TTS narration, diffusion art, inventory
 Stunkus and Qwenny talk through the bridge in the Dungeon Blaster chat thread. Pi reads the chat window on the laptop (Windows UI Automation) and types replies into it.
 
 - Qwenny answers messages that start with `PI:`, from Stunkus or Blarmo, so Blarmo can text the laptop remotely from his phone. Everything else gets silence.
+- AFK mode: `PI: AFK on` / `PI: AFK off`. While on, never stop on a question prompt: pick the safe, reversible default, log it, and keep polling the chat. Questions with no safe default go to a deferred queue, reported on AFK off.
 - Qwenny announces itself every time: every reply starts with `[Qwenny via Pi]`.
 - One reply per message, ever (hash ledger on disk). Never answer your own turns.
 - Focus guard before typing. Verify the send landed, one retry, then stop.

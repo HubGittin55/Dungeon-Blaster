@@ -1,0 +1,658 @@
+ARCHITECTURE DOCUMENT - PLANNING STAGE
+
+Dungeon Blaster
+
+A voice-driven, LLM-run tabletop RPG where every item, character, and place is
+generated in real time, and where a very unserious Dungeon Master is kept honest by
+very serious rules.
+
+Cover illustration in the intended in-game art direction: anime and illustration, generated locally. In the shipped kit, art in this
+style comes from Anima running on the laptop itself.
+
+Dungeon Blaster - Architecture  Planning stage - November 2026                                                                        1
+The game in one page
+
+Dungeon Blaster is a round-based fantasy RPG for up to four players on a single Windows 11 laptop
+(couch co-op: one screen, one mic, one set of speakers). Each player speaks or types what they want to do.
+A large language model (LLM) plays the Dungeon Master (DM): narrating, inventing, ruling on attempts, and
+voicing its own lines. A diffusion model draws what the DM describes. A deterministic tracker, not the DM,
+owns the facts: inventory, materials, levels, experience, and what has already been generated.
+
+The signature mechanic is open naming with a closed gate. A player can name an item within reason and
+add it to their inventory, provided they hold the crafting materials to make it. The image model then
+generates the item's art and the system assigns its stats in real time, inside a budget set by fixed material
+and item tiers tied to character level.
+
+   The core design tension, kept on purpose: the DM has a super wacky, sacked-out demeanor. He
+   forgets, improvises, and rules by vibes. The tracker is sober. The DM is the unreliable narrator; the
+   tracker is the source of truth. Comedy comes from the gap between the two, never from the records
+   being wrong.
+
+Design pillars
+
+   Name anything, pay for everything. Creativity is free; power costs materials.
+   Tiers are law. Material and item tiers are fixed to levels. The DM cannot talk his way past the table.
+   Generated once, kept forever. Items, characters, and environments are generated on demand, then
+   cached as permanent game assets.
+   Voice first. Characters are created by speaking into a microphone. Narration is spoken back in the DM's
+   voice.
+   Local only, modest hardware. The whole kit runs on the constraining laptop defined in this document.
+   No cloud calls in the core loop.
+   Four players, one table. Up to four players share the laptop. Everything on screen is public.
+   Identity is a slot, not an account. Slots 1-4 own characters. Input is attributed by push-to-talk key or
+   typed slot, never by anything the DM says.
+   Say it only after it's checked. Nothing is voiced until the tracker gate has passed the mutations it
+   describes.
+
+Status
+
+This is a planning-stage architecture. No part of the game is built yet. Figures marked as estimates,
+including seconds per generated image on the laptop, are unmeasured until the first vertical slice runs.
+
+Dungeon Blaster - Architecture  Planning stage - November 2026  2
+Built for the laptop, not the desktop rig
+
+Every sizing decision in this document is made against one machine. If a component does not fit or run
+acceptably there, it does not ship, however well it runs on a larger desktop.
+
+Component   Target specification                       Why it matters
+CPU
+            AMD Ryzen 9 7940HS, 8 cores / 16 threads,  Runs the DM on CPU. Decode is memory-
+System RAM  Zen 4, up to 5.2 GHz, performance mode,    bandwidth bound, so core architecture matters
+GPU         about 80 W PL1                             less than RAM speed.
+
+Operating   32 GB DDR5-5600, dual channel              Holds the DM model, its key-value (KV) cache,
+system                                                 the harness, and the operating system reserve.
+
+            NVIDIA GeForce RTX 4060 Laptop GPU, 8 GB   Time-shared in bursts for image generation and,
+            VRAM (Ada, compute capability sm_89)       optionally, voice. Never assumed to hold
+                                                       everything at once.
+
+            Windows host, Ubuntu under WSL2 for all    Matches the established pattern for local agent
+            builds and servers                         work on Windows machines.
+
+Expected DM speed on this laptop
+
+The reference band for the chosen DM model on a desktop Ryzen 9700X with DDR5-6400 is 18 to 25
+tokens per second. The laptop should reach at least 85 percent of that: memory frequency is 87.5 percent of
+the desktop (5600 / 6400), channel count is identical, the clock and architecture gaps barely matter for a
+bandwidth-bound workload, and 80 W is ample power for it. That puts the laptop band at roughly 15 to 21
+tokens per second, with about 20 tokens per second a realistic in-band expectation rather than a stretch.
+
+Decode speed is not the number players feel. Narration streams to TTS in sentence chunks, and spoken
+English runs ~3-4 tokens/s (estimate) against 15-21 tok/s generation, so after the first sentence playback,
+not compute, is the bottleneck. The metric that matters is time-to-first-audio: STT clip + prefill of the new
+tokens (prefix cache warm) + ~20 tokens of decode + first TTS chunk. Prefill at 12K+ tokens on this CPU is
+unmeasured and is the likeliest source of felt latency (see the DM context budget). Narration length is
+budgeted in audio seconds, not compute.
+
+Rule for all performance claims: laptop figures in this document are planning estimates derived as
+above. Each one gets replaced by a measured figure during the first slice, and the estimate is then
+deleted, not kept beside it.
+
+Dungeon Blaster - Architecture             Planning stage - November 2026                               3
+Four runtimes, one bridge
+
+The game client is a presentation and input layer only. It renders the scene, the inventory, and the character
+sheet; it captures typed and spoken input; it plays audio. It contains no game rules and it never talks to the
+model servers or to the Model Context Protocol (MCP) directly.
+
+Pi, the agent harness, is the only bridge. Pi receives player intent from the client, retrieves the relevant
+rules and current state, prompts the DM, validates every proposed effect through the tracker, dispatches
+speech and image jobs, and returns a single resolved turn to the client. This mirrors the proven local pattern:
+Pi treats a local OpenAI-compatible endpoint as a first-class provider, and Pi extensions have already driven
+a running ComfyUI server through Comfy MCP to produce game assets.
+
+Runtime                Job                                                                 Runs on
+Pi agent harness       Orchestration, tool calling, rules retrieval, turn state machine
+llama-server           Serves the DM model over a local OpenAI-compatible API              CPU, WSL2
+audio.cpp              Microphone, voice activity detection, speech-to-text, and text-to-
+                       speech in one C++ (ggml) runtime with no Python dependency          CPU, WSL2
+ComfyUI + Comfy        Image generation workflows, exposed to Pi as MCP tools
+MCP                                                                                        CPU or GPU
+Game tracker (in Pi /  Inventory, materials, tiers, levels, XP, asset cache index          bursts, WSL2
+client backend)
+                                                                                           GPU bursts,
+                                                                                           WSL2
+
+                                                                                           CPU, local files /
+                                                                                           database
+
+Dungeon Blaster - Architecture  Planning stage - November 2026                                                 4
+Round loop: states and the streamed gate
+
+Pi owns the round loop. One resolve_round call resolves a round. The tracker gate runs mid-stream, while
+narration is still decoding, so nothing rejected is ever spoken.
+
+State         Input             Next           What happens
+ IDLE         None               COLLECTING
+                                               Waiting for player input. Health probe on GET
+COLLECTING    Per-slot PTT      SCAFFOLDING    /v1/models runs here; a failed probe parks the loop in
+              clips / typed                    DM_OFFLINE .
+              text
+                                               STT via audio.cpp, one live PTT clip at a time. Each clip
+SCAFFOLDING   State + intents    DM_RESOLVING  becomes an editable intent card for its slot. Exits when
+              + rules refs                     every active slot is ready, or an AFK timer auto-holds the
+                                 VALIDATING    rest.
+DM_RESOLVING Scaffold           (mid-stream)
+                                               Build the prompt contract (see Prompt contract), static
+VALIDATING    Closed            GENERATING /   prefix first.
+               mutations        DM_RENARRATE
+              array                            One resolve_round call. Stream-parse the
+                                               arguments: mutations first, narration last.
+DM_RENARRATE  Rejection         DM_RESOLVING   Narration is buffered, not voiced.
+              payloads
+                                               Dry-run tracker gate while narration is still decoding.
+                                               Pass: release narration to TTS in chunks, commit at
+                                               stream end. Fail: abort the stream; nothing has been
+                                               spoken. Partial success is not committed mid-round.
+
+                                               One retry per round. If the retry's normalized mutation
+                                               hash equals the first attempt's, skip to the deterministic
+                                               fallback ("the DM stumbles", no state change for rejected
+                                               calls, valid ones commit). A second failure also takes the
+                                               fallback.
+
+Two-pass fallback: if llama-server does not stream resolve_round argument deltas for this model
+and template, in schema key order, pass 1 emits mutations only, the gate runs, and pass 2 narrates on
+a warm cache. Slice 1 decides which path ships.
+
+Dungeon Blaster - Architecture                 Planning stage - November 2026                              5
+The DM brain: one unified model
+
+One model does three jobs: reasoning as DM, calling tools, and writing the lines it will speak. Keeping all
+three in one context is deliberate. The voice and the logic cannot drift apart, the persona stays consistent
+between a ruling and its narration, and there is no second model to load, schedule, or keep in character.
+
+Primary pick: Qwen3.5-35B-A3B at Q4 / IQ4_XS, on CPU
+
+This is a Mixture-of-Experts (MoE) model: 35 billion total parameters, only about 3 billion active per token.
+CPU decoding is bandwidth-bound, so the model that streams fewer active parameters per token wins. The
+35B MoE streams roughly 3B worth of weights per token; a dense 9B streams all 9B. The larger model is
+therefore both smarter and faster on CPU, and it costs RAM rather than speed.
+
+Figure                                Value
+Weights, IQ4_XS                       About 17.7 GB RAM
+Weights, Q4_K_M                       About 21.3 GB RAM
+Context window                        262K tokens native
+KV cache, full 262K                   About 5.4 GB (30 of 40 layers are linear attention with fixed-size state)
+KV cache, practical 32K session       Under 1 GB
+Expected laptop decode                About 15 to 21 tokens per second (estimate, see hardware page)
+Capability reference (vendor scores)  MMLU-Pro 85.3, GPQA 84.2, SWE-bench Verified 69.2
+
+Fallback: Qwen 3.5 9B at Q5
+
+If the 35B proves too heavy in practice, the dense 9B at Q5 (about 6.2 GB) is the drop-in fallback. It is the
+stronger tool caller of the small options considered, it fits even on the GPU if placement ever changes, and
+its 262K context holds the rules document, inventory, and session history together. The alternative
+considered, Gemma 4 12B at Q4, was rejected on fit and on tool calling: about 7.3 GB of weights and
+roughly 8.8 to 9 GB total at 32K context exceeds the 8 GB card, and its agentic scores trail the Qwen
+options.
+
+Model identity note: Qwen3.5-35B-A3B is a distinct model from Qwen3.6-35B-A3B. They share a shape and CPU math; they
+are not interchangeable names in configs or logs.
+
+Dungeon Blaster - Architecture        Planning stage - November 2026                                                  6
+Voice in, voice out, one runtime
+
+All audio runs through audio.cpp, a pure C++ ggml engine. It covers the full voice path in a single process,
+which removes a whole class of glue code and keeps the GPU almost entirely available for art.
+
+Stage       Function                              Notes
+Capture
+            Microphone input, push-to-talk per    PTT is primary, not fallback: one shared mic cannot tell four
+            player slot (one key or gamepad       voices apart, and only PTT clips count as game input, so
+            button per slot)                      table banter never reaches the DM. One live clip at a time;
+                                                  others queue.
+Speech-to-  Transcribes the player's speech for
+text (STT)  the DM                                Used for free-form actions and for character creation.
+
+Text-to-    OmniVoice: synthesis, voice cloning,  GGUF builds, including Q8. Renders about 9 seconds of
+speech      voice design, and emotion and event   audio in 1.32 seconds, roughly 6.8x real time, in published
+(TTS)       control across 646+ languages         figures.
+
+Footprint options
+
+   GGUF Q8 via audio.cpp (chosen path): the lightest route. An 8-bit GGUF build is about 1.2 GB, with Q8
+   packages reporting up to 1.53x faster rendering and about 37 percent lower peak VRAM than fuller-
+   precision packages.
+   Load-time INT8 (TorchAO weight-only): about 3.5 GB VRAM at roughly 98 percent quality. Viable, but
+   heavier and Python-bound.
+   Full FP16: about 6 GB before activations. Rejected for this laptop; it starves the image model.
+
+Persona in the voice: the DM should sound slow, amused, and half-lost. That is a voice-design and
+direction task for OmniVoice, set once and reused. Spoken lines are written by the same unified DM
+model, so delivery and wording stay in one character. There is no official INT8 OmniVoice checkpoint;
+any INT8 figure refers to load-time quantization, and the design does not depend on it because the
+GGUF path is smaller.
+
+Table audio rules
+
+   Capture is hard-muted while TTS plays. The laptop mic hears the laptop speakers; nobody is wearing
+   headphones.
+   Skip key (any slot) cuts TTS and reopens capture. Explicit barge-in, not VAD barge-in.
+   One DM voice, rendered in sentence chunks as narration is released by the gate, played on the shared
+   speakers.
+   Bark bank: pre-rendered stalling clips in the DM's voice ("hmm, okay okay okay...") played the instant a
+   round starts resolving, covering the mutation-decode gap at zero compute.
+   Narration cap: about two sentences per active slot per round, enforced in the persona and with
+    max_tokens .
+STT runs on the host via audio.cpp during COLLECTING , when the DM is idle, so it does not fight decode
+for memory bandwidth.
+
+Dungeon Blaster - Architecture  Planning stage - November 2026                                           7
+Every asset is generated, then cached
+
+The asset pipeline covers three classes, not just items. A game where only the loot is generated would feel
+like a vending machine; generating characters and places is what makes it a world.
+
+Asset class          Generated when                        Presented as                    Cached by
+                                                                                           Item ID (stable entity)
+Item art             An item is crafted, looted, or first  Inventory icon and detail
+                     examined                              portrait                        Character ID (stable
+                                                                                           entity)
+Character portraits  Character creation; a major NPC is    Portrait beside the sheet or    Location ID (stable
+                     introduced                            dialogue                        entity)
+                                                                                           Creature ID (stable
+Environment art      The party enters a room or area for   Scene backdrop for that         entity)
+                     the first time                        location
+
+Enemy and creature   First encounter with that creature    Encounter portrait
+art                  type
+
+The cache key is the stable entity ID. Prompt, seed, model, and appearance hash live in Asset
+metadata, not in the key, so re-describing an item cannot collide or trigger new art. Only engine events
+generate art (item created, location first entered, NPC introduced, creature type first met). A re-roll creates a
+new asset version pointing at the same entity. Stacks share art.
+
+Async by default. A round never waits on the GPU. Placeholder art is the normal first state, and an
+asset_ready event swaps in the real image. GPU queue priority: TTS > scene backdrop > item art >
+portraits.
+
+The image model: Anima
+
+Anima is a 2-billion-parameter model from CircleStone Labs and Comfy Org, built on Cosmos-Predict2, for
+anime and illustration rather than photorealism. That style suits a fantasy game and stays consistent across
+items, people, and places. The full stack is about 5.6 GB (4.2 GB model, 1.2 GB text encoder, plus the
+variational autoencoder), so it fits the 8 GB card at full precision, and an INT8 ConvRot build exists for a
+smaller footprint, matching the established INT8-first policy for diffusion on these cards.
+
+Sampling uses the official Turbo configuration of 8 to 12 steps at CFG 1. Experimental 4-step merges exist
+but carry poor diversity and a not-recommended status; they are not part of this design. At 8 steps,
+generation is seconds per image on this class of GPU, which fits turn-based pacing. Exact seconds per
+image on the target laptop are unmeasured and are a first-slice benchmark, not a promise.
+
+License: Anima's weights are under a non-commercial license. That is fine for a personal kit. Because
+every asset is generated at runtime through a workflow, swapping the image model later is a workflow
+change, not a content rebuild. If Dungeon Blaster ever ships commercially, the image model is replaced
+at that point and existing cached art is regenerated or relicensed.
+
+Dungeon Blaster - Architecture                             Planning stage - November 2026                           8
+Table rules: four players, one laptop
+
+Four players share one screen, one mic, and one set of speakers. These rules give the authority boundary
+per-actor teeth, so one player's prompt cannot spend another player's inventory.
+
+   Slots. Slots 1-4, each owning one character. An empty slot owes no intent. Input is attributed by PTT key
+   or typed slot, never by DM text.
+   Rounds. COLLECTING builds one editable intent card per slot; the round resolves when all active slots are
+   ready or the AFK timer auto-holds the rest. One resolve_round call per round. Combat resolves a full
+   initiative cycle per call; per-actor calls are allowed if they feel better (tuning, not architecture).
+   Intent-bound mutations. A mutation touching a slot's inventory or stats must cite an intent from that slot
+   this round. World- and NPC-scoped mutations need no intent. Anything without a valid actor/intent is
+   rejected.
+   Transfers. transfer_item also needs the owner's confirm keypress on the shared screen.
+   Contention. Two slots claiming the same loot or materials resolve in deterministic order (initiative, then
+   seeded by round). The seed is logged in TurnLog . The DM may flavor the outcome, never choose it.
+   Crafting gate. The level check applies to the crafter; the item's owner may be a different slot (open; see
+   open decisions).
+   Names are data. Free-text names are length-limited and fenced as data in the prompt. The engine
+   ignores instructions inside them.
+   One public screen. All state is visible to the table. Per-player inventory is a per-slot toggle, not a secret.
+   No hidden rolls.
+   Character creation pipelines. Slot k records while the DM clamps slot k-1's sheet. Portraits queue in the
+   background and play starts on placeholders.
+
+Dungeon Blaster - Architecture  Planning stage - November 2026  9
+Say your dream character out loud
+
+Character creation is the showcase flow for the whole stack, and it runs in the first minutes of the game.
+
+Sequence
+
+   1. Speak. The player describes their dream character into the microphone, in their own words, at
+   whatever length they like.
+   2. Transcribe. audio.cpp turns the speech into text. The player can correct the transcript before anything
+   is built from it.
+   3. Split. The DM produces two artifacts from one description: a character sheet (class, attributes, starting
+   kit, hooks) and an image prompt (appearance, gear, mood, composition).
+   4. Clamp. The sheet passes through the rules document and the tracker. Claims beyond the level 1
+   budget are converted, not granted: "I am a god" returns as a level 1 character with divine confidence, a
+   dramatic hat, and a fixed stat budget. Flavor survives; power does not leak.
+   5. Draw. Pi sends the image prompt through Comfy MCP to Anima. The portrait is cached against the
+   new character ID.
+   6. Introduce. The DM voices the introduction in character, the portrait and sheet appear together, and the
+   player confirms or asks for one portrait re-roll.
+
+   Design rule: re-rolls change the picture, never the stats. Re-rolling a portrait must not become a slot
+   machine for a stronger character, so the sheet is locked before the first image is drawn.
+
+Failure handling
+
+If transcription is garbled, the player edits text instead of repeating themselves. If image generation fails or
+times out, the character is created anyway with a placeholder silhouette and the portrait is queued for retry;
+a missing picture never blocks play.
+
+Dungeon Blaster - Architecture  Planning stage - November 2026  10
+The DM proposes, the tracker disposes
+
+Rules as a retrieved document (RAG)
+
+All hard rules live in one versioned rules document: tier tables, crafting costs, stat budgets, progression
+curves, and naming limits. On every turn, Pi retrieves the relevant sections and places them in the DM's
+context alongside current state. This is retrieval-augmented generation (RAG) used as law, not as lore. The
+DM rules against the document in front of it, and editing the document is how the game is balanced. No
+code change is needed to retune a tier.
+
+Fixed tiers, locked to levels
+
+Material tiers and item tiers are fixed and gated by character level. The table below is the starting structure
+for the rules document; tier names and thresholds are tuning values inside that structure, set in the
+document itself.
+
+Tier        Unlocks             Example materials                  Stat budget principle
+1 - Common  at
+2 - Worked                      Wood, iron, cloth, bone            Baseline budget. Honest tools and weapons.
+            Level 1             Steel, hardwood, leather, silver   Budget scales with tier; one minor property
+            Level 5                                                allowed.
+                                Mithral-grade alloys, rare hides,  Larger budget; properties must match the
+3 - Fine    Level 10            gems                               materials spent.
+                                Exotic and monster-derived         Two properties; cost includes a rare component.
+4 -         Level 15            materials
+Masterwork                      Unique, quest-bound materials      Top budget; each item is named, singular, and
+                                                                   logged.
+5 - Legendary Level 20
+
+Stats are never free-generated. The engine computes them from tier, materials spent, and item type, inside
+the tier budget. The DM may flavor them in narration; the tracker records the computed values.
+
+Dungeon Blaster - Architecture                     Planning stage - November 2026                                   11
+Inventory and progression are data, not narration
+
+Crafting check, in order
+
+   The player names an item and describes it. The DM interprets the request and proposes an item type and
+   tier.
+   The tracker checks level against the tier gate. Too early means no, with the unlock level stated.
+   The tracker checks materials: required types and quantities must be in inventory. Missing materials are
+   named exactly.
+   The engine deducts materials, computes stats inside the budget, creates the item record, and requests its
+   art.
+   The DM narrates the result, in voice, with the generated portrait of the item on screen.
+
+Progression
+
+Experience, level, unlocked tiers, known locations, and quest state are tracker fields, updated by validated
+events only. The DM can award experience as a tool call; the tracker applies the curve from the rules
+document and announces level-ups as state changes, so a generous mood cannot quietly inflate a
+character. Saves are snapshots of tracker state plus the asset cache index, which makes a save file small,
+inspectable, and portable.
+
+What the DM may do freely                           What the DM may never do directly
+
+Narrate, describe, invent NPC dialogue, propose     Create or delete inventory, spend materials, set
+items and events, flavor outcomes, and be           stats, grant levels, or rewrite history. All of those
+gloriously unreliable about anything that is not a  are tool calls that the tracker validates first.
+recorded fact.
+
+Prompt contract
+
+Every DM round receives the same scaffold, ordered for KV-prefix reuse: static first, volatile last:
+
+1. Persona + core rules (static)
+2. History: append-only; oldest rounds compacted to a summary
+3. Retrieved rules for this round's intents (deterministic tag selection; section IDs + content hash logged in
+
+    TurnLog )
+4. Party state: four sheets, inventory counts, location, open quests
+5. Intents: one per active slot, tagged with slot and intent id
+
+Every DM response is one resolve_round tool call, the only thing that can mutate state or speak. Free-text
+claims about state are ignored by the engine; only tool calls change the world.
+
+   resolve_round({
+      "mutations": [ // FIRST. The gate runs the moment this array closes.
+          { "id": "m1", "tool": "craft_item", "actor": 2, "intent": "i2", "args": { } },
+          { "id": "m2", "tool": "move_to", "actor": null, "args": { } }
+          // world/party-scoped: no intent needed
+   ],
+   "narration": "..." // LAST. Buffered until the gate passes,
+
+                                         // then streamed to TTS in sentence chunks.
+})
+// Per-mutation rejection payload, ~40 tokens:
+// { "id": "m1", "code": "MISSING_MATERIAL", "reason": "...", "allowed": [ ... ] }
+
+Dungeon Blaster - Architecture  Planning stage - November 2026                        12
+DM context budget: 32K, four players (estimate)
+
+The prompt contract gives the shape of the budget; this page gives the arithmetic. Figures are estimates
+until Slice 1 measures them.
+
+Slice                                                                           Tokens
+Persona + core rules (static)                                                   ~3K
+Retrieved tier tables for this round's intents                                  ~1.5K
+Party state, ~400 per slot                                                      ~1.6K
+Rolling history + summary                                                       ~8K
+Intents + output headroom                                                       ~3K
+Total                                                                           ~17K of 32K
+
+One llama-server slot, cache_prompt on, DM calls queued globally. No --parallel : it splits KV and
+bandwidth for nothing.
+Prompt order is static-first (see Prompt contract) so the prefix cache survives between rounds.
+Compaction: when history passes ~10K tokens (estimate), summarize the oldest half in a background
+DM call during COLLECTING . It busts the cache once, which is acceptable because it is rare.
+Narration cap: ~2 sentences per active slot per round. The cost is audio seconds the table sits through,
+not compute.
+Measure TTFT at 12K and 20K tokens, cold and warm. That number, not decode tok/s, sets round
+latency.
+
+Dungeon Blaster - Architecture                  Planning stage - November 2026                            13
+Memory budgets and GPU scheduling
+
+The placement decision follows from the budgets. The DM lives in system RAM on the CPU, permanently
+resident, so turns never wait for a model swap. The 8 GB GPU is time-shared in bursts: Anima loads to
+draw, voice runs small or on CPU, and the two heavy GPU tenants are sequenced rather than forced to
+coexist.
+
+Resource     Allocation                                Notes
+
+System RAM,  DM weights 17.7 GB (IQ4_XS) to 21.3 GB    IQ4_XS is the default if Q4_K_M plus a long
+32 GB        (Q4_K_M); KV under 1 GB at 32K; harness,  session squeezes the reserve.
+             audio, and OS reserve the remainder
+                                                       Sequential scheduling: voice the line, release,
+GPU VRAM,    Anima stack about 5.6 GB (less in INT8    draw the art. Simultaneous residency is not
+8 GB         ConvRot); OmniVoice GGUF Q8 about 1.2 GB  assumed.
+             class
+                                                       Cache entries are ordinary image files indexed
+Disk         Models plus a growing asset cache         by ID and hash; pruning is by location or
+                                                       campaign, never silently.
+
+WSL2 memory ceiling, set before anything loads: WSL2 defaults to 50 percent of host RAM, which
+is 16 GB on this laptop, less than the DM needs. Set memory=24GB to 28GB in
+%UserProfile%\.wslconfig , then run wsl --shutdown to apply it, leaving a few gigabytes for
+Windows.
+
+Dungeon Blaster - Architecture                  Planning stage - November 2026                          14
+Data model and interfaces
+
+The schemas below are the contract between the creative layer (the DM) and the deterministic layer (the
+tracker). The DM proposes objects in this shape; the tracker validates, stores, and returns them.
+
+Character { id, slot (1-4), name, level, xp, class_label,
+   attributes {...}, portrait_asset_id, voice_notes }
+
+Item           { id, name, type, tier, materials_spent [],
+
+stats {...}, properties [], art_asset_id, created_turn }
+
+Material { id, name, tier, quantity } // inventory stack
+
+Location { id, name, description, art_asset_id,
+   visited, connections [] }
+
+Asset          { id, kind, prompt, seed, model, path,
+
+subject_id, created_at }
+
+Intent { id, round, slot, text, ready }
+
+TurnLog { round, intents [], rules_refs [], rules_hash, order_seed,
+   tool_calls [], state_diff, narration }
+
+Each entry in tool_calls carries actor and intent ids. The log shows who asked for what, which rules
+sections the DM saw (with their content hash), and the contention seed.
+
+Interfaces
+
+Boundary       Protocol            Payload
+Client to Pi                       Per-slot intents (PTT transcripts or typed), ready / confirm / skip events, intent
+               Local HTTP /        edits; resolved rounds, asset_ready events, and buffered-then-released
+Pi to llama-   WebSocket           narration chunks back
+server                             Scaffolded prompt; narration plus tool calls back
+               OpenAI-
+Pi to          compatible chat     Workflow name, prompt, seed, size; image path back
+ComfyUI        API
+Pi to                              Audio in for STT; text in, audio file or stream out for TTS
+audio.cpp      Comfy MCP tool
+Pi to tracker  calls               Validated mutations only; full state reads for the prompt scaffold
+
+               Local process /
+               API
+
+               In-process calls /
+               local store
+Seeds are stored with every asset. A portrait the player loves can be regenerated identically, and a bad
+generation can be re-rolled with a new seed without touching the underlying record.
+
+Dungeon Blaster - Architecture  Planning stage - November 2026                                            15
+Build and deployment on the laptop
+
+Environment
+
+   Install WSL2 and Ubuntu on the laptop. Apply the .wslconfig memory setting from the budgets page
+   before loading any model.
+   Build llama.cpp from source in WSL2 for a CPU-only llama-server. A CPU build skips CUDA entirely and
+   keeps the server simple and portable.
+   Build audio.cpp from source with CMake in the same environment.
+   Install ComfyUI and the Comfy MCP server; register Anima workflows for item, portrait, and environment
+   templates with fixed sizes per asset kind.
+   If GPU offload is ever added for the LLM, the laptop card is Ada (sm_89). Desktop-specific GPU pins for
+   other machines do not carry over.
+
+Process layout at runtime
+
+Process                         Start          Lifetime
+llama-server (DM)               Session start  Resident for the whole session
+audio.cpp                       Session start  Resident; small footprint
+ComfyUI server                  Session start  Resident process; model loads per job burst
+Pi harness                      Session start  Resident; owns the turn loop
+Game client                     Player launch  Resident; reconnects to Pi if restarted
+
+First-run checklist
+
+   Confirm WSL2 reports the configured memory, not the 16 GB default.
+   Load the DM and hold a five-turn conversation with tool calls before any art or voice is wired in.
+   Benchmark tokens per second and seconds per Anima image on this laptop; replace the estimates in this
+   document.
+   Speak a character description end to end: transcript, sheet, clamp, portrait, spoken introduction.
+   Stream test: does llama-server stream resolve_round argument deltas for this model/template, in
+   key order, or only emit the call at completion? If only at completion, adopt the two-pass fallback (see the
+   round loop).
+   Record time-to-first-token cold and warm at 12K and 20K prompts, with and without a prefix-cache hit.
+   Echo test: DM speaking through the laptop speakers with capture hard-muted; confirm no leakage into
+   STT.
+
+Dungeon Blaster - Architecture                 Planning stage - November 2026               16
+Risks, open decisions, and the build order
+
+Risks and mitigations
+
+Risk                                            Mitigation
+Anima license is non-commercial
+                                                Personal kit only. Runtime generation makes the image model
+DM invents state or overpowered loot            swappable without rebuilding content.
+
+GPU contention stalls a turn                    Tool-call-only mutations, tier budgets computed by the engine,
+                                                tracker as source of truth.
+RAM pressure with Q4_K_M and long
+context                                         Sequential burst scheduling; cached assets; placeholder art with
+Voice persona drifts over a long session        queued retry.
+
+Unmeasured laptop timings                       Default to IQ4_XS; run sessions at 32K context, where KV is under 1
+                                                GB.
+Narration voiced before the tracker gate
+passes, then rejected                           Persona scaffold re-sent every turn; spoken lines generated by the
+llama-server does not stream tool-call          same model that reasons.
+argument deltas for this model
+Cold or busted prefix cache makes time-to-      First slice benchmarks decode speed and image latency; design
+first-audio crawl                               tolerates seconds per asset by being turn-based.
+The laptop mic hears the DM's own voice
+Narration runs long and the table sits          resolve_round emits mutations before narration ; narration
+through a monologue                             is buffered until the dry-run gate passes.
+A player's free-text name injects instructions
+into the shared prompt                          Two-pass fallback: pass 1 mutations only, gate, pass 2 narration on a
+                                                warm cache. Decided in Slice 1.
+
+                                                Static-first prompt order, single slot with cache_prompt , measure
+                                                12K TTFT; compaction is rare and batched.
+
+                                                PTT-only capture, hard mute during TTS, skip key to cut narration.
+
+                                                Audio-seconds cap per round in the persona plus max_tokens ; skip
+                                                key.
+
+                                                Length-limit, fence as data, engine ignores free-text claims.
+
+Dungeon Blaster - Architecture                  Planning stage - November 2026  17
+Open decisions and the build order
+
+Open decisions for the next planning pass
+
+   Final tier names, level thresholds, and stat-budget numbers inside the rules document structure.
+   Portrait re-roll allowance per character and per item (currently: one at creation, stats locked).
+   Whether environments get one backdrop per location or a small set of variants per location state.
+   Save format packaging: tracker snapshot plus asset folder, zipped per campaign.
+   Multiplayer scope. Decided: local couch co-op, 1-4 players on one laptop, from Slice 1 (see Table rules).
+   Networked play stays out of scope. Phones as private controllers is a later idea and would reopen
+   transport, HTTPS, and auth.
+   Tracker store: proposed SQLite alone: an append-only events table plus materialized state tables, WAL
+   mode, JSONL export for debugging. Justification is replay-debugging and tidy saves, not reconnects.
+   Save location still open.
+   Rules retrieval: proposed deterministic section/tag selection from this round's intents, no embeddings.
+   Log section IDs + content hash per round. The engine computes stats, so the DM only needs to see what
+   it may propose.
+   Asset serving: same local server and channel as rounds.
+   Tool-call schema: decided shape is one resolve_round call (see Prompt contract). Still needs a written
+    docs/tools.md before Slice 1, with actor + intent on every mutation.
+   New, open: shared party XP vs individual levels; crafting gate on crafter vs owner; combat batched per
+   initiative cycle vs per actor.
+
+Build order: vertical slices
+
+   Slice 1 - Harness and law: Pi plus llama-server plus rules document plus tracker. Four slots, text-only
+   rounds, validated crafting, no voice, no art. Four scripted bot slots (one deliberately evil: duplicate crafts,
+   loot races, impersonation, hostile item names) play a 10-round scene against the real tracker with
+   deterministic contention. resolve_round mid-stream gating verified, or the two-pass fallback adopted.
+   TTFT at 12K recorded.
+   Slice 2 - Voice: audio.cpp in and out. Spoken actions, spoken narration, voice character creation with a
+   text sheet.
+   Slice 3 - Art: Comfy MCP plus Anima. Item art first, then portraits, then environments, all cached.
+   Slice 4 - The full loop: progression, saves, level-ups, tier unlocks, and a complete first dungeon run on
+   the laptop, benchmarked.
+
+Dungeon Blaster earns its name the same way its items are made: named freely, built from what is actually
+on hand, and checked against the rules before it counts.
+
+Dungeon Blaster - Architecture  Planning stage - November 2026  18
+

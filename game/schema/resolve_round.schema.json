@@ -1,0 +1,57 @@
+{
+ "type": "object",
+ "properties": {
+  "narration": {
+   "type": "string",
+   "description": "Spoken consequence of the applied mutations. Pure text: no state, no rules, no numbers the tracker did not produce."
+  },
+  "mutations": {
+   "type": "array",
+   "description": "Applied by the deterministic tracker as soon as this array closes, BEFORE any of the narration is voiced. Every entry must be valid or the whole round is rejected.",
+   "items": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string",
+      "description": "stable id within this round, e.g. m1"
+     },
+     "tool": {
+      "type": "string",
+      "description": "tracker tool name, e.g. spend, craft, damage, give, move"
+     },
+     "actor": {
+      "type": [
+       "integer",
+       "null"
+      ],
+      "description": "party slot 1-4, monster index, or null for the world"
+     },
+     "intent": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "description": "short player-facing intent string; never authority over state"
+     },
+     "args": {
+      "type": "object",
+      "description": "tool arguments; the tracker validates and may reject"
+     }
+    },
+    "required": [
+     "id",
+     "tool",
+     "actor",
+     "args"
+    ],
+    "additionalProperties": false
+   }
+  }
+ },
+ "required": [
+  "narration",
+  "mutations"
+ ],
+ "additionalProperties": false,
+ "description": "Emission order: narration BEFORE mutations, so TTS can start while the mutations are still being generated. The gate applies nothing until the whole object parses, so this buys 3.1-6.8s of spoken latency and costs nothing (notes/voice-stack.md). Key order is the order of `properties`, not of `required` - the grammar walks properties. Never add a non-property key to `properties` (a `_note` key there becomes a field the model must emit)."
+}

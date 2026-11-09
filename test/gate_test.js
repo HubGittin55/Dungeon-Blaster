@@ -6,6 +6,7 @@
 // Deterministic, no LLM, no GPU. If this goes red, the law is broken and nothing else matters.
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { loadRules } from '../tracker/rules_doc.js';
 import { newGame, joinSlot, addMaterials, setIntents, resolveRound, rulesForCall, computeItemStats, mutationHash } from '../tracker/engine.js';
 
@@ -321,6 +322,29 @@ t('mutationHash: same ask in different clothes hashes the same', () => {
   const c = [{ ...m1, args: { name: 'club', materials: [{ name: 'wood', qty: 3 }] } }, m2];
   assert.notEqual(mutationHash(a), mutationHash(c));
   assert.equal(mutationHash([]), mutationHash([]));
+});
+
+t("the item types the contract names are the engine's, spelled the engine's way", () => {
+  // The live model asked to craft and was refused with: "item_type must be one of weapon, armor, shield,
+  // tool, trinket, consumable". It had obeyed the contract text I wrote, which said (weapon|armour|tool|
+  // consumable): the wrong spelling of armor, no shield, no trinket. Every craft the model attempted in the
+  // honest way failed, and a player saw four boxes that did nothing. A hand-copied vocabulary is the bug;
+  // this reads the list out of the engine's own error and requires the contract to contain every word.
+  const g = fresh();
+  setIntents(g, intents([1, 'lash a wood shaft to a knot of sinew']));
+  const out = resolveRound(g, {
+    narration: 'testing',
+    mutations: [craft('m1', 1, 'i1', C('Test Widget', '__not_an_item_type__', [{ name: 'wood', qty: 2 }, { name: 'sinew', qty: 1 }]))],
+  });
+  const reason = (out.rejected.find((r) => r.code === 'BAD_ARGS') || {}).reason || '';
+  const listed = reason.replace(/^.*one of\s*/, '').split(/,\s*/).filter(Boolean);
+  assert(listed.length >= 4, `could not read the engine's item types out of: ${reason}`);
+
+  const schema = readFileSync(new URL('../game/schema/resolve_round.schema.json', import.meta.url), 'utf8');
+  for (const name of listed) {
+    assert(new RegExp(`\\b${name}\\b`).test(schema), `contract never mentions '${name}', so the model cannot use it`);
+  }
+  assert(!/armour/.test(schema), "the contract taught the model 'armour'; the engine accepts 'armor'");
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

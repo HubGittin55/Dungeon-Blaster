@@ -109,7 +109,11 @@ export function contractNote(extra) {
   return [
     'Call resolve_round exactly once. Emit narration first, then the mutations that pay for it.',
     'Every mutation must carry a unique id, the tool name, the actor slot that requested it (1-4, or null for world changes), and the intent id it implements. An actor can only be moved by an intent that slot actually issued this round.',
-    'Materials must use the exact names in the rules, in quantities the actor actually holds. You may not propose stats, tiers, prices, or contention winners; the tracker computes them from what you pay.',
+    'craft_item needs name, item_type and a materials ARRAY like [{"name":"wood","qty":2},{"name":"sinew","qty":1}]. '
+    + 'A craft with no materials array is not a craft, and neither is one whose materials are an object. '
+    + 'Material names and quantities must come from the Materials line of the slot performing the craft - the '
+    + 'tracker refuses anything they are not holding, and you get one retry. You may not propose stats, '
+    + 'tiers, prices, or contention winners; the tracker computes those from what you pay.',
     'Keep narration to two or three spoken sentences. Do not describe anything your mutations do not create.',
     'Address every intent in the table, in order, so nobody at the couch is silently dropped: one short '
     + 'clause per player who spoke. Four people asked for four things - answering one of them is not a '

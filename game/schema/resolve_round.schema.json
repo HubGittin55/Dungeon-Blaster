@@ -44,7 +44,7 @@
           },
           "args": {
             "type": "object",
-            "description": "Arguments for this tool only. craft_item: name, item_type (weapon|armour|tool|consumable), materials [{name,qty}] from the ACTOR's own materials. take_item: item. drop_item: item. transfer_item: item, to_slot (the giver is the actor, not an argument). move_to: location. award_xp: amount with either slot 1-4 or party true. introduce_npc: name, role, portrait true. Anything the rules do not name is rejected with the allowed values attached."
+            "description": "Arguments for this tool only. craft_item REQUIRES all three keys: name, item_type (weapon|armor|shield|tool|trinket|consumable) and materials, where materials is a JSON ARRAY of objects exactly like [{\"name\":\"wood\",\"qty\":2},{\"name\":\"sinew\",\"qty\":1}] - never omitted, never an object keyed by name, never a bare list of names. Every name must appear on that actor's Materials line, in a quantity they hold; the rules decide what the recipe needs and the tracker computes the item's stats from what you pay. take_item: item. drop_item: item. transfer_item: item, to_slot (the giver is the actor, not an argument). move_to: location. award_xp: amount with either slot 1-4 or party true. introduce_npc: name, role, portrait true. Anything the rules do not name is rejected with the allowed values attached."
           }
         },
         "required": [

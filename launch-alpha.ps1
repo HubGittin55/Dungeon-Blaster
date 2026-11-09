@@ -167,6 +167,20 @@ if ($NoArt) {
 $node = (Get-Command node.exe -ErrorAction SilentlyContinue)
 if (-not $node) { Write-Host "`nnode.exe not on PATH - DEPENDENCIES.md 2" -ForegroundColor Red; exit 1 }
 
+# ---------------------------------------------------------------- free the port
+# Two ways to end up with a browser pointed at a game you did not start: launch twice, or leave a server
+# running from a previous session. The new window then prints "address in use" while the browser opens the
+# OLD table, and every fix in the repo looks like it did nothing. So the port is cleared, in the open, and
+# only this one port is ever touched.
+$stale = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+foreach ($s in $stale) {
+    $p = Get-Process -Id $s.OwningProcess -ErrorAction SilentlyContinue
+    if ($p) {
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        Write-Host ("  port {0}  cleared a leftover {1} (pid {2})" -f $Port, $p.ProcessName, $p.Id) -ForegroundColor DarkYellow
+    }
+}
+
 $env:DB_GAME_PORT = "$Port"
 if (-not $env:DB_TTS_URL)  { $env:DB_TTS_URL = 'http://127.0.0.1:8082/v1/audio/speech' }
 if ($NoVoice)             { $env:DB_TTS_URL = '' }

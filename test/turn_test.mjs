@@ -9,7 +9,7 @@
 
 import assert from 'node:assert/strict';
 import { loadRules } from '../tracker/rules_doc.js';
-import { newGame, joinSlot, addMaterials, setIntents } from '../tracker/engine.js';
+import { newGame, joinSlot, addMaterials, setIntents, resolveRound } from '../tracker/engine.js';
 import { runTurn, barkFor, RULES_PATH, STARTING_KIT } from '../game/gm.mjs';
 
 const rules = loadRules(RULES_PATH);
@@ -128,5 +128,38 @@ await t('a bark never contains a claim: atmosphere only, because nothing was ver
   }
 });
 
+// The guard Stunkus asked for by name: "the early-out has unit coverage via mutationHash but no turn-level
+// test, so a refactor can drop it again without a test going red." He was right, and the refactor that
+// dropped it was mine. These two tests are the difference between a law and a comment.
+
+await t('a retry that repeats the first attempt is stopped BEFORE the gate runs again', async () => {
+  const g = table();
+  let gates = 0;
+  const gate = (gg, call, opt) => { gates++; return resolveRound(gg, call, opt); };
+  // A stubborn DM: the same MATERIAL_UNKNOWN proposal however many times it is told the answer.
+  const { complete, seen } = scripted(said('Moonglass. It is moonglass and I will not be reasoned with.', [moonglass()]));
+  const { result } = await runTurn(g, { complete, gate });
+  assert.equal(seen.length, 2, `model was asked ${seen.length} times`);
+  // Without the early-out this is 2: the repeat gets gated a second time and the round pays a gate for a
+  // proposal that is byte-identical to the one it just rejected.
+  assert.equal(gates, 1, `gate ran ${gates} times - the identical retry was gated again`);
+  assert.equal(result.ok, false);
+  assert.equal(result.rejected[0].code, 'MATERIAL_UNKNOWN');
+});
+
+await t('but a retry that LEARNED something still gets gated (the early-out must not swallow it)', async () => {
+  const g = table();
+  let gates = 0;
+  const gate = (gg, call, opt) => { gates++; return resolveRound(gg, call, opt); };
+  const { complete } = scripted(
+    said('Moonglass.', [moonglass('m1')]),
+    said('Fine. Wood and sinew.', [club('m1')]));
+  const { result } = await runTurn(g, { complete, gate });
+  assert.equal(gates, 2, `gate ran ${gates} times; a changed retry must still be evaluated`);
+  assert.ok(result.ok, `the corrected retry should commit: ${JSON.stringify(result.rejected)}`);
+  assert.equal(result.committed.length, 1);
+});
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
+

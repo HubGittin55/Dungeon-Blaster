@@ -151,7 +151,7 @@ export function barkFor(turnLog, pick = Math.random) {
  * test/turn_test.mjs asserts that second attempts keep byte-identical prefixes, because this is the kind
  * of thing that regresses as a one-character "improvement" to the persona and costs 151s per round.
  */
-export async function runTurn(g, { ctx = {}, fallback = true, complete = dmComplete, schema = loadSchema(), notify = () => {} } = {}) {
+export async function runTurn(g, { ctx = {}, fallback = true, complete = dmComplete, gate = resolveRound, schema = loadSchema(), notify = () => {} } = {}) {
   const intents = g.intents;
   const needed = rulesForCall(g, MUTATIONS_FOR_PROMPT);
 
@@ -198,7 +198,11 @@ ${contractNote()}`,
       break;
     }
     if (firstHash === null) firstHash = hash;
-    result = resolveRound(g, call, { mode: 'strict', rules_refs: needed.refs });
+    // `gate` is injectable for exactly one reason: the early-out is invisible from outside unless a test can
+    // count gate evaluations, and a law nobody can count is a law a refactor can delete silently. My own
+    // extraction of the turn dropped the early-out and 107 tests stayed green, because the only coverage
+    // was on mutationHash itself. Deleting the early-out now turns test/turn_test.mjs red by name.
+    result = gate(g, call, { mode: 'strict', rules_refs: needed.refs });
     if (result.ok) break;
     // Reject loudly, then give the model its errors back with the allowed values attached.
     const feedback = result.rejected.map((r) => `${r.id} ${r.code}: ${r.reason}${r.allowed ? ` allowed: ${r.allowed.join(', ')}` : ''}`).join('\n');

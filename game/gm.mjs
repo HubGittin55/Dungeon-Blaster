@@ -12,7 +12,7 @@
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { resolveRound, rulesForCall } from '../tracker/engine.js';
+import { resolveRound, rulesForCall, mutationHash } from '../tracker/engine.js';
 
 export const ROOT = fileURLToPath(new URL('../', import.meta.url));
 export const SCHEMA_PATH = `${ROOT}game/schema/resolve_round.schema.json`;
@@ -174,6 +174,7 @@ ${contractNote()}`,
   let messages = [...stable, mutableTail()];
   let call = null;
   let result = null;
+  let firstHash = null;
   const attempts = [];
 
   while (attempt <= 2) {
@@ -187,6 +188,16 @@ ${contractNote()}`,
       continue;
     }
     call = proposal;
+    // Identical-hash early-out (tools.md §3): one retry per round, and if the retry proposes the
+    // same mutations as the first attempt it learned nothing - stop and take the deterministic
+    // fallback instead of spending a gate and a decode on a repeat. `result` stays the first
+    // attempt's rejection, so the fallback below runs on this call.
+    const hash = mutationHash(call.mutations);
+    if (firstHash !== null && hash === firstHash) {
+      notify('retry repeats the first attempt verbatim - taking the fallback', 'warn');
+      break;
+    }
+    if (firstHash === null) firstHash = hash;
     result = resolveRound(g, call, { mode: 'strict', rules_refs: needed.refs });
     if (result.ok) break;
     // Reject loudly, then give the model its errors back with the allowed values attached.

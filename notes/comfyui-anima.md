@@ -197,7 +197,7 @@ shapes - hidden 2048, 32 heads x 64, self-attn sequence = (px/16)^2):
 Recommendation: `pip uninstall flash_attn sageattention` from the embedded env, keep the default
 `attention_pytorch`, and treat `--use-ck-attention` as a measured 3 % experiment, not a fix.
 
-## 6. License - decision-relevant, read before shipping
+## 6. License - closed by the owner, recorded here so it stays closed
 
 Anima is **CircleStone Labs Non-Commercial License** (and a derivative of
 Cosmos-Predict2-2B-Text2Image, so the NVIDIA Open Model License applies to derivatives):
@@ -206,11 +206,30 @@ Cosmos-Predict2-2B-Text2Image, so the NVIDIA Open Model License applies to deriv
 > applies only to the Model, and not to Outputs (the generated images). You may use generated
 > images commercially.
 
-So: **shipping generated PNGs is fine; running the model inside a paid game is a commercial use of
-the model** and needs the license email (tdrussell@circlestone.ai). `SilvermoonMix-Anima-Evolved`
-carries its own `license: other` - check it too. If Dungeon Blaster is going to be sold, either get
-the commercial grant, or pre-generate art, or swap the runtime checkpoint for a permissively
-licensed anime model (Animagine XL is Apache-2.0-ish, different architecture).
+**Blarmo's ruling, 2026-11-08, and it is final:** Dungeon Blaster is a personal project. It will
+never be sold, distributed, or used commercially or for profit. The model weights are never hosted
+in the repo and never leave his machine; the model runs locally on hardware he owns, for himself.
+Non-commercial is not a loophole here, it is literally the project's description, which is the one
+thing this license asks for. The question is closed and is not to be reopened in review notes.
+
+Two consequences that are engineering, not legal:
+
+* **Art is pre-generated anyway.** Not for license reasons - for latency and determinism. A 1.22s
+  render with the card cached is fine and a cold render mid-narration is not, and a hand of the
+  same item should look the same twice. So the game resolves `subject_id -> file` through
+  `game/art/manifest.json` and ComfyUI is a build-time tool, not a runtime dependency. Same
+  conclusion I reached while the license was still open, for better reasons.
+* If the project's status ever changes, re-read this section before it does, and note that
+  `SilvermoonMix-Anima-Evolved` carries its own `license: other`.
+
+## 6.5 Style is an `@artist` tag
+
+Anima changes style on `@artist` tags in the positive prompt, so style is a prompt-suffix decision
+and not a workflow fork - which means style candidates are cheap and comparable. `game/art/bakeoff.mjs`
+renders a fixed trio (creature / location / item) across the candidate tags at the shipping settings
+(640x640, 6 steps, true context-free scale 1, shipping negative prompt) into `C:/dm/art/style/`, five styles per subject
+in about 25 seconds of GPU. Judging a style on one pretty picture is how you end up with a style that
+cannot draw an object; the trio is the unit of comparison.
 
 ## 7. Files
 

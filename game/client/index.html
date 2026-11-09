@@ -351,12 +351,15 @@ setTimeout(demo, 400);
   </div>
 </div>
 <style>
-  #db-gear{position:fixed;right:18px;top:14px;z-index:60;width:42px;height:42px;border-radius:50%;
+  #db-gear{position:fixed;right:18px;bottom:16px;z-index:60;width:42px;height:42px;border-radius:50%;
     display:grid;place-items:center;font-size:22px;cursor:pointer;color:#e8d8a8;user-select:none;
     background:radial-gradient(circle at 35% 30%,#3a2f22,#171310);border:1px solid #6b5333;
     box-shadow:0 0 18px #000a,inset 0 0 10px #0008}
   #db-gear:hover{color:#fff3cf;border-color:#c8a35a}
   #db-settings{position:fixed;inset:0;z-index:61;background:#000a;display:grid;place-items:center}
+  /* A display in this rule beats the UA's [hidden]{display:none}, so without this the panel is open on
+     every load - visible in a headless screenshot as a box stuck on 'Loading...' over the table. */
+  #db-settings[hidden]{display:none}
   #db-set-card{width:min(560px,92vw);max-height:82vh;overflow:auto;background:linear-gradient(#1d1813,#120f0c);
     border:1px solid #6b5333;border-radius:10px;box-shadow:0 22px 60px #000c;color:#e8dcc2;font:15px/1.45 Georgia,serif}
   #db-set-head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;

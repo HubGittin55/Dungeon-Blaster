@@ -1,0 +1,106 @@
+<!doctype html>
+<!-- The roll, canned. One throw, one reveal, no numbers until the tracker's number arrives.
+     This replaces the 3D spike (spikes/d20/), whose self-test was honestly reporting that it printed the
+     announced face UPSIDE DOWN on 19 of 20 rolls. That page stays as the evidence trail. The reason this
+     version exists instead of another legibility fix: a die that paints a number is making a claim about
+     the result, so it can disagree with the tracker and you have two answers and one law. Here the die is
+     unmarked, and the number is text drawn over it - so the only possible bug is "wrong string", a
+     comparison, not a projection I have to trust.
+     The value is read from ?value= and never generated here. No value, no number: a "?" and a note. -->
+<meta charset="utf-8">
+<title>roll</title>
+<style>
+  html,body{margin:0;height:100%;background:radial-gradient(120% 90% at 50% 18%,#241d15,#0a0806 70%);overflow:hidden;
+    font:16px Georgia,serif;color:#e8d8a8}
+  #stage{position:absolute;inset:0;display:grid;place-items:center}
+  /* the floor: a horizon and a soft pool of light, so the die reads as landing SOMEWHERE */
+  #floor{position:absolute;left:50%;bottom:12%;width:78vmin;height:26vmin;transform:translateX(-50%);
+    background:radial-gradient(50% 60% at 50% 40%,#5a4326,#241a11 65%,transparent 72%);filter:blur(1px)}
+  #dust{position:absolute;left:50%;bottom:24%;width:46vmin;height:12vmin;transform:translateX(-50%) scale(.4);
+    background:radial-gradient(50% 50% at 50% 50%,#c9a86b55,transparent 70%);opacity:0;border-radius:50%}
+  #die{position:relative;width:34vmin;height:31vmin;transform-origin:50% 60%}
+  /* an unmarked d20 silhouette: a hexagonal shell with interior facets, all of them blank */
+  #die svg{width:100%;height:100%;filter:drop-shadow(0 1.4vmin 2vmin #000c)}
+  #shadow{position:absolute;left:50%;bottom:-7vmin;width:26vmin;height:6vmin;transform:translateX(-50%) scale(.5);
+    background:radial-gradient(50% 50% at 50% 50%,#000b,transparent 70%);opacity:.25}
+  #num{position:absolute;left:50%;top:47%;transform:translate(-50%,-50%);font-size:12.5vmin;font-weight:bold;
+    color:#ffe9b0;text-shadow:0 0 2.4vmin #ffb64855,0 .4vmin .8vmin #000;opacity:0;letter-spacing:-.02em}
+  #crit{position:absolute;left:50%;top:72%;transform:translate(-50%,-50%);font-size:4vmin;letter-spacing:.3em;
+    color:#ffd27a;opacity:0;text-transform:uppercase}
+  #probe{position:absolute;left:12px;bottom:10px;font-size:11px;color:#6c5a3d}
+  /* one throw: drop, tumble, hit, two shrinking bounces, settle, then the number fades up */
+  @keyframes throw1{
+    0%{transform:translate(0,-64vmin) rotate(0deg) scale(.62)}
+    34%{transform:translate(0,0) rotate(212deg) scale(1)}
+    44%{transform:translate(0,-11vmin) rotate(300deg) scale(1)}
+    58%{transform:translate(0,0) rotate(382deg) scale(1)}
+    68%{transform:translate(0,-4.5vmin) rotate(412deg) scale(1)}
+    78%{transform:translate(0,0) rotate(428deg) scale(1)}
+    88%{transform:translate(0,-1.2vmin) rotate(434deg) scale(1)}
+    100%{transform:translate(0,0) rotate(437deg) scale(1)}
+  }
+  /* squash on impact - the only cue that says "it has weight" */
+  @keyframes hit{0%,32%{transform:scaleY(1)}36%{transform:scaleY(.72) scaleX(1.12)}42%{transform:scaleY(1.04)}100%{transform:scaleY(1)}}
+  @keyframes puff{0%,33%{opacity:0;transform:translateX(-50%) scale(.4)}40%{opacity:.85;transform:translateX(-50%) scale(1)}70%,100%{opacity:0;transform:translateX(-50%) scale(1.5)}}
+  @keyframes reveal{0%{opacity:0;transform:translate(-50%,-50%) scale(.82)}60%{opacity:1;transform:translate(-50%,-50%) scale(1.06)}100%{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+  @keyframes shadow1{0%{opacity:.1;transform:translateX(-50%) scale(.4)}34%{opacity:.5;transform:translateX(-50%) scale(1)}100%{opacity:.42;transform:translateX(-50%) scale(.96)}}
+  .go #die{animation:throw1 1.9s cubic-bezier(.34,.01,.2,1) forwards}
+  .go #die svg{animation:hit 1.9s ease-out 1}
+  .go #dust{animation:puff 1.9s ease-out 1}
+  .go #shadow{animation:shadow1 1.9s ease-out forwards}
+  .set #num{animation:reveal .62s ease-out forwards}
+  .set #crit{animation:reveal .5s ease-out .28s forwards}
+  /* ?still=1 renders the settled frame with no animation, for screenshots and CI */
+  .still #die,.still #die svg,.still #dust,.still #shadow{animation:none!important}
+  .still #num,.still #crit{animation:none!important;opacity:1}
+</style>
+<div id="stage">
+  <div id="floor"></div><div id="dust"></div>
+  <div id="die">
+    <svg viewBox="0 0 100 92">
+      <defs>
+        <linearGradient id="a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8c7247"/><stop offset="1" stop-color="#4b3a24"/></linearGradient>
+        <linearGradient id="b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6d5734"/><stop offset="1" stop-color="#38291a"/></linearGradient>
+        <linearGradient id="c" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a8895a"/><stop offset="1" stop-color="#5a452b"/></linearGradient>
+      </defs>
+      <g stroke="#221a10" stroke-width="1.6" stroke-linejoin="round">
+        <polygon points="50,2 93,26 93,66 50,90 7,66 7,26" fill="url(#b)"/>
+        <polygon points="50,2 93,26 50,44 7,26" fill="url(#c)"/>
+        <polygon points="50,44 93,26 93,66 50,90" fill="url(#a)"/>
+        <polygon points="50,44 7,26 7,66 50,90" fill="url(#b)" opacity=".82"/>
+        <polygon points="50,44 50,90 7,66" fill="#00000022" stroke="none"/>
+      </g>
+    </svg>
+    <div id="shadow"></div>
+    <div id="num">?</div>
+    <div id="crit"></div>
+  </div>
+</div>
+<div id="probe"></div>
+<script>
+(() => {
+  const q = new URLSearchParams(location.search);
+  // The number is supplied by the server. If it is missing or out of range the honest answer is a question
+  // mark, not a roll this page invented - a die that fills in its own total is the bug this page exists to
+  // make impossible.
+  const raw = q.get('value');
+  const v = Number(raw);
+  const ok = raw !== null && Number.isInteger(v) && v >= 1 && v <= 20;
+  const num = document.getElementById('num');
+  num.textContent = ok ? String(v) : '?';
+  if (!ok) {
+    document.getElementById('probe').textContent = 'no value= from the server - showing "?" rather than inventing a roll';
+    document.getElementById('stage').classList.add('set');
+    return;
+  }
+  if (v === 20) document.getElementById('crit').textContent = 'critical';
+  if (v === 1) document.getElementById('crit').textContent = 'firm root';
+  if (q.has('still')) { document.body.classList.add('still'); document.getElementById('probe').textContent = `still frame, value=${v}`; return; }
+  document.body.classList.add('go');
+  // ?probe=1 settles immediately: no timers to wait on, so a headless render of this page is deterministic.
+  const settle = q.has('probe') ? 0 : 1900;
+  setTimeout(() => document.body.classList.add('set'), settle);
+  // A roll that has finished is a fact; keep it on screen until the host page navigates away.
+  setTimeout(() => { document.getElementById('probe').textContent = `settled value=${v}`; }, settle + 700);
+})();
+</script>

@@ -138,7 +138,11 @@ function tell(text, isBark) {
 }
 
 // ------------------------------------------------------------------- SSE
-const events = new EventSource('/api/events');
+// ?probe=1 renders without the live stream. A page holding an EventSource is never finished loading,
+// so --headless --dump-dom waits forever (two attempts hung 400s and 220s) and a client that cannot be
+// rendered headlessly is a client whose visual regressions only a human eyeball catches.
+const PROBE = new URLSearchParams(location.search).has('probe');
+const events = PROBE ? { addEventListener() {}, close() {} } : new EventSource('/api/events');
 events.onopen = () => { $('net').classList.add('on'); };
 events.onerror = () => { $('net').classList.remove('on'); };
 events.addEventListener('hello', (e) => { const d = JSON.parse(e.data); mode(d.mode); log('connected'); });
@@ -235,7 +239,9 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape') closeRoll(); });
 // The die is theatre. The value comes from the server (crypto in the deterministic layer) and the
 // animation is told what happened - it cannot overrule it. See spikes/d20/README.md.
 function showRoll(value) {
-  $('rollframe').src = `/d20/index.html?auto=1&value=${value}&seed=${(Math.random() * 1e9) | 0}`;
+  // The canned throw in game/client/roll/, not the 3D spike: an unmarked die plus a text reveal cannot
+  // contradict the tracker, and it carries no self-test that fails 19 rolls in 20.
+  $('rollframe').src = `/roll/index.html?value=${value}${PROBE ? '&probe=1' : ''}`;
   $('roll').classList.add('on');
 }
 function closeRoll() { $('roll').classList.remove('on'); $('rollframe').src = 'about:blank'; }

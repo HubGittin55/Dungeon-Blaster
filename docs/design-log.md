@@ -52,3 +52,20 @@ that seed is stable across sessions and still costs 2-3s instead of a manifest e
 Lettering is one string, not five. `LETTERING` in `pregen.mjs` names the letterforms and every text asset
 composes from it; `TEXT_RULES` says exactly-that-text-and-nothing-else, because left alone the model adds a
 subtitle. Baked text is still only for things that never change: a title yes, "3 of 4 players joined" no.
+
+## 2026-11-09 - why nobody has seen a screenshot of the client
+
+`game/client/index.html` opens `new EventSource('/api/events')` unconditionally on line 141. A page with an
+open stream is never finished loading, so `msedge --headless --dump-dom --virtual-time-budget=N` never
+reaches the point where it prints: two attempts hung (one for 400s, one for 220s) and produced nothing.
+That is a testability hole, not an Edge quirk - and a client nobody can render headlessly is a client whose
+visual regressions are caught by a human eyeballing a laptop.
+
+Provable fix, not yet done: let the page be rendered without a live stream (a probe flag that skips the
+EventSource, or the server closing it once the client says it is ready). Then a headless dump is a real
+assertion - grep the DOM for content that only exists if the JavaScript ran.
+
+Until then, be precise about what is verified for the settings menu: the HTTP surface is verified by
+requests (default, valid POST, malformed body 400, unknown style falls back and says so, choice survives a
+restart), the panel's JS parses with a real exit code, and the markup is served. The rendered panel has not
+been seen. Saying "menu works" would be a claim about pixels I have not looked at.

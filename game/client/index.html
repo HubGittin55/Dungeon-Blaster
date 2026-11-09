@@ -393,7 +393,7 @@ setTimeout(demo, 400);
       row.innerHTML = `<input type="radio" name="dbstyle" value="${st.key}">
         <span><span class="lbl">${st.label}</span>
         <span class="meta">${st.engine} &middot; ${st.note || ''}</span>
-        <span class="meta${off ? ' none' : ''}">${st.rendered} asset${st.rendered === 1 ? '' : 's'} rendered${off ? ' &mdash; choosing it serves other styles' art instead' : ''}</span></span>`;
+        <span class="meta${off ? ' none' : ''}">${st.rendered} asset${st.rendered === 1 ? '' : 's'} rendered${off ? ' &mdash; choosing it serves other styles&rsquo; art instead' : ''}</span></span>`;
       row.querySelector('input').checked = st.key === cfg.style;
       row.querySelector('input').onchange = () => { pick = st.key; apply.disabled = pick === cfg.style; load_note(); };
       bodyEl.appendChild(row);

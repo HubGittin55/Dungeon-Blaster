@@ -32,6 +32,30 @@ const HOST = '127.0.0.1';
 const FAKE = process.argv.includes('--fake-dm');
 const TTS_URL = process.env.DB_TTS_URL || '';
 const ASR_URL = process.env.DB_ASR_URL || 'http://127.0.0.1:8081';
+const TTS_VOICE = process.env.DB_TTS_VOICE || 'af';
+
+/**
+ * What is this box called?
+ *
+ * Both voice failures this build had the same shape: a model name copied from another vendor's docs. The
+ * mic path asked audio.cpp for 'parakeet-tdt-0.6b-v3' and got HTTP 500 'unknown model id'; the narrator
+ * asked for no model at all and got 'missing required json key: model'. The boxes know their own names -
+ * :8081 answers 'asr', :8082 answers 'tts' - so they are asked once and the answer is cached. Nothing here
+ * is a hardcoded model name any more, which is the only way it stays true when the model is swapped out.
+ */
+const modelCache = new Map();
+async function modelId(origin, kind) {
+  const key = `${origin}|${kind}`;
+  if (modelCache.has(key)) return modelCache.get(key);
+  try {
+    const r = await fetch(`${origin}/v1/models`, { signal: AbortSignal.timeout(5_000) });
+    const ids = ((await r.json()).data || []).map((m) => m.id);
+    const id = ids.find((x) => x === kind) || ids.find((x) => x.startsWith(kind)) || ids[0] || null;
+    if (id) modelCache.set(key, id);
+    return id;
+  } catch { return null; }
+}
+
 const ART_URL = process.env.DB_ART_URL || 'http://127.0.0.1:8188';
 const ART_TEMPLATE = process.env.DB_ART_TEMPLATE || join(ROOT, 'game/art/anima_card_api.json');
 const ART_DIR = join(ROOT, 'game/art');
@@ -79,12 +103,40 @@ let g = freshTable();
 
 // ------------------------------------------------------------------ adapters
 
-/** Narrator. Fire and forget: audio is never allowed to hold a round hostage. */
-function speak(text, voice = 'dm') {
-  if (!TTS_URL || !text) return;
-  fetch(TTS_URL, { method: 'POST', headers: { content: 'application/json' }, body: JSON.stringify({ text, voice }) })
-    .catch(() => emit('log', { level: 'warn', msg: `TTS unreachable at ${TTS_URL} - playing silent` }));
+/**
+ * Narrator. Renders the clip and pushes it to every couch screen as a `speech` event.
+ *
+ * It used to POST the text and throw the response away, so the narrator had never once been audible and the
+ * code looked like it worked. Still fire-and-forget in the round path: a 20-second voice render must never
+ * hold up a table, so narration audio arrives a beat late rather than blocking a beat.
+ */
+async function speakNow(text) {
+  if (!TTS_URL || !text) return null;
+  const origin = new URL(TTS_URL).origin;
+  const model = await modelId(origin, 'tts');
+  const r = await fetch(TTS_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model, input: text, voice: TTS_VOICE, response_format: 'wav' }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!r.ok) {
+    const why = (await r.text().catch(() => '')).slice(0, 160);
+    emit('log', { msg: `narrator silent: TTS ${r.status} ${why}` });
+    return null;
+  }
+  const buf = Buffer.from(await r.arrayBuffer());
+  emit('speech', { clip: `data:audio/wav;base64,${buf.toString('base64')}`, bytes: buf.length, text });
+  return buf;
 }
+
+function speak(text, voice = 'dm') {
+  speakNow(text).catch((e) => emit('log', { msg: `narrator silent: ${e.message} - is the voice box up on :8082?` }));
+}
+
+// A voice line the player can click, because "the narrator is wired up" is not a thing anyone can believe
+// from a log line. Used by the Voice button, and by nothing else.
+const VOICE_TEST_LINE = 'Four of you wake up in a damp cell, with a door, and a rumour of stairs.';
 
 /** ComfyUI. Returns a viewable URL, or null with a reason the UI can show instead of a blank card. */
 async function renderArt(job) {
@@ -342,14 +394,28 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { value });
     }
 
+    if (req.method === 'POST' && path === '/api/voice_test') {
+      const buf = await speakNow(VOICE_TEST_LINE);
+      if (!buf) {
+        return json(res, 502, { error: 'narrator did not answer', hint: TTS_URL ? `nothing came back from ${TTS_URL}` : 'voice is off - launch without -NoVoice' });
+      }
+      res.writeHead(200, { 'content-type': 'audio/wav', 'cache-control': 'no-store' });
+      return res.end(buf);
+    }
     if (req.method === 'POST' && path === '/api/say') {
       const wav = await body(req);
       if (!wav.length) return json(res, 400, { error: 'no audio' });
       const fd = new FormData();
       fd.append('file', new Blob([wav], { type: 'audio/wav' }), 'talk.wav');
-      fd.append('model', 'parakeet-tdt-0.6b-v3');
-      const r = await fetch(`${ASR_URL}/v1/audio/transcriptions`, { method: 'POST', body: fd, signal: AbortSignal.timeout(30_000) });
-      if (!r.ok) return json(res, 502, { error: `ASR ${r.status}`, hint: 'is audio.cpp up on :8081? launch-alpha.ps1 starts it' });
+      const asrModel = await modelId(new URL(ASR_URL).origin, 'asr');
+      if (asrModel) fd.append('model', asrModel);
+      const r = await fetch(`${ASR_URL}/v1/audio/transcriptions`, { method: 'POST', body: fd, signal: AbortSignal.timeout(60_000) });
+      if (!r.ok) {
+        // The box explains itself better than this hint ever could: 'unknown model id' and 'no such file'
+        // are different problems wearing the same 502.
+        const why = (await r.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 180);
+        return json(res, 502, { error: `ASR ${r.status}`, hint: `${why || 'audio.cpp gave no reason'} (:8081)` });
+      }
       const j = await r.json();
       const text = String(j.text || j.transcript || '').trim();
       return json(res, 200, { text });

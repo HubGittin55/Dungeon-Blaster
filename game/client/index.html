@@ -72,6 +72,7 @@
   <span class="pill" id="round">round —</span>
   <span style="flex:1"></span>
   <button id="rollbtn" title="The tracker owns the number; the die just performs it">Roll d20</button>
+  <button id="voicebtn" title="Hear the narrator - this is the whole voice path, from render to speaker">Voice</button>
   <button id="newbtn" title="Fresh table, four seats">New table</button>
   <button class="big" id="go">Play round</button>
 </header>
@@ -179,6 +180,13 @@ events.addEventListener('art', (e) => {
 });
 
 events.addEventListener('roll', (e) => showRoll(JSON.parse(e.data).value));
+// The narrator's clip arrives from the server as a data URL. Browsers refuse the first unasked sound, so a
+// failure here is reported rather than swallowed - silence with no explanation is how this stayed broken.
+events.addEventListener('speech', (e) => {
+  const d = JSON.parse(e.data);
+  const a = new Audio(d.clip);
+  a.play().catch((err) => log(`browser blocked the narrator (${err.name}) - click the page once, then press Voice`, 'warn'));
+});
 
 function mode(m) {
   const el = $('mode');
@@ -211,6 +219,8 @@ function draw(s) {
     input.value = p.intent || '';
     const commit = () => { const v = input.value.trim(); if (v) intent(p.slot, v); };
     input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') commit(); });
+    // Blur counts as saying it. A box you typed in and clicked out of was, until now, a box that said nothing.
+    input.addEventListener('blur', commit);
     el.querySelector('.mic').addEventListener('click', (ev) => record(p.slot, ev.currentTarget));
     box.append(el);
   }
@@ -223,11 +233,43 @@ async function intent(slot, text) {
 
 function setBusy(b) { busy = b; $('go').disabled = b; $('go').textContent = b ? 'The DM is thinking…' : 'Play round'; }
 
+/**
+ * Typing an action is not the same as telling the game.
+ *
+ * The boxes only ever submitted on Enter, so the natural couch motion - type in Bram's box, click Ash's box,
+ * type, reach for Play round with the mouse - left every box unsent and the round empty. The DM was handed
+ * "nobody said anything" and correctly described the furniture, which is exactly what Blarmo reported. So
+ * playing a round collects whatever is in the boxes first, in seat order, and says how many it sent: a round
+ * with no actions in it should be visibly odd, not silently theatrical.
+ */
+async function flushIntents() {
+  const sends = [];
+  document.querySelectorAll('#slots .slot').forEach((el, i) => {
+    const v = (el.querySelector('input')?.value || '').trim();
+    if (v) sends.push(intent(i + 1, v));
+  });
+  await Promise.all(sends);
+  return sends.length;
+}
+
 $('go').addEventListener('click', async () => {
+  const n = await flushIntents();
+  if (!n) return log('nothing to resolve - type what someone does, then press play', 'warn');
+  log(`${n} action${n > 1 ? 's' : ''} handed to the game master\u2026`);
   setBusy(true);
   const r = await fetch('/api/round', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   if (r.status !== 202) { log(`round refused: ${r.status}`, 'err'); setBusy(false); }
 });$('newbtn').addEventListener('click', () => fetch('/api/new', { method: 'POST' }).then(() => log('new table dealt')));
+$('voicebtn').addEventListener('click', async () => {
+  log('rendering a line of narration\u2026');
+  try {
+    const r = await fetch('/api/voice_test', { method: 'POST' });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); return log(`no audio: ${j.error}${j.hint ? ' - ' + j.hint : ''}`, 'err'); }
+    const n = (await r.blob());
+    log(`narrator rendered ${(n.size / 1024) | 0} KB of wav`);
+    await new Audio(URL.createObjectURL(n)).play();
+  } catch (e) { log(`voice failed: ${e.message}`, 'err'); }
+});
 $('rollbtn').addEventListener('click', async () => {
   const r = await fetch('/api/roll', { method: 'POST' });
   const { value } = await r.json();

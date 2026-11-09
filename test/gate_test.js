@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict';
 import { loadRules } from '../tracker/rules_doc.js';
-import { newGame, joinSlot, addMaterials, setIntents, resolveRound, rulesForCall, computeItemStats } from '../tracker/engine.js';
+import { newGame, joinSlot, addMaterials, setIntents, resolveRound, rulesForCall, computeItemStats, mutationHash } from '../tracker/engine.js';
 
 const rules = loadRules(new URL('../rules/rules.md', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'));
 let pass = 0, fail = 0;
@@ -304,6 +304,23 @@ t('turn_log records intents, seed, rules refs and the diff', () => {
   assert.ok(tl.rules_refs.length >= 6 && tl.rules_refs.every((x) => x.hash));
   assert.ok(tl.state_diff.some((d) => d.startsWith('item:')));
   assert.deepEqual(tl.tool_calls[0], { id: 'm1', tool: 'craft_item', actor: 1, intent: 'i1' });
+});
+
+console.log('\n== retry policy ==');
+t('mutationHash: same ask in different clothes hashes the same', () => {
+  const m1 = { id: 'm1', tool: 'craft_item', actor: 1, intent: 'i1', args: { name: 'club', materials: [{ name: 'wood', qty: 2 }] } };
+  const m2 = { id: 'm2', tool: 'move_to', actor: null, intent: null, args: { location: 'Damp cell' } };
+  const a = [m1, m2];
+  // Renumbered ids, reordered mutations, reordered arg keys: same ask.
+  const b = [
+    { id: 'm7', tool: 'move_to', actor: null, intent: null, args: { location: 'Damp cell' } },
+    { id: 'm3', tool: 'craft_item', actor: 1, intent: 'i1', args: { materials: [{ qty: 2, name: 'wood' }], name: 'club' } },
+  ];
+  assert.equal(mutationHash(a), mutationHash(b));
+  // A changed quantity is a different ask.
+  const c = [{ ...m1, args: { name: 'club', materials: [{ name: 'wood', qty: 3 }] } }, m2];
+  assert.notEqual(mutationHash(a), mutationHash(c));
+  assert.equal(mutationHash([]), mutationHash([]));
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

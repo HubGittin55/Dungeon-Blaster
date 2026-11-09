@@ -3,11 +3,17 @@
 #   - the desktop screenshot is a screenshot of somebody's desktop
 #   - the vendor metadata dumps are 1.6 MB of HuggingFace API echo
 *.pdf
-*.png
-*.jpg
 notes/hf_api.json
 notes/hf_tree.json
 notes/type_enum.json
+
+# Images are excluded everywhere EXCEPT pre-made art under game/art/,
+# which ships with the game. Runtime-generated art lives in C:/dm/art
+# outside the repo and is never committed.
+*.png
+*.jpg
+!game/art/
+!game/art/**
 
 saves/
 journal/

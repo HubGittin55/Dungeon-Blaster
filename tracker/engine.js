@@ -181,6 +181,31 @@ function claimKey(seed, m, i) {
   return createHash('sha256').update(`${seed}|${m?.id || 'x'}|${i}`).digest('hex').slice(0, 12);
 }
 
+/**
+ * Normalised mutation hash: a call's mutations reduced to the fields that decide whether the gate
+ * would treat them the same (tool, actor, intent, args), with ids and ordering dropped. Two
+ * proposals with the same hash are the same ask in different clothes, which is what the one-retry
+ * policy in tools.md §3 tests for before spending a gate and a decode on a repeat.
+ */
+export function mutationHash(mutations) {
+  const parts = (mutations || []).map((m) => stableStringify({
+    tool: m?.tool ?? null,
+    actor: m?.actor ?? null,
+    intent: m?.intent ?? null,
+    args: m?.args ?? null,
+  }));
+  parts.sort();
+  return createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 16);
+}
+
+function stableStringify(v) {
+  if (v === undefined) return 'null';
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`;
+  const keys = Object.keys(v).filter((k) => v[k] !== undefined).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(v[k])}`).join(',')}}`;
+}
+
 function reject(m, code, reason, allowed) {
   const r = { id: m?.id ?? '?', code, reason };
   if (allowed) r.allowed = allowed;

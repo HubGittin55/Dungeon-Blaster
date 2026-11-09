@@ -14,7 +14,7 @@
 
 // @ts-ignore - loaded through jiti; the tracker is plain ESM JavaScript at ../../tracker
 import {
-  newGame, joinSlot, addMaterials, setIntents, resolveRound, rulesForCall, saveGame, loadGame, validateName,
+  newGame, joinSlot, addMaterials, setIntents, resolveRound, rulesForCall, saveGame, loadGame, validateName, mutationHash,
 } from '../../../tracker/engine.js';
 // @ts-ignore
 import { loadRules } from '../../../tracker/rules_doc.js';
@@ -42,7 +42,7 @@ Anything you assert about the world becomes law the moment the tracker hears it,
 let game = null;
 let rules = null;
 let schema = null;
-let afk = new Set();
+let skipped = new Set(); // slots auto-skipped each round (NOT the bridge AFK mode)
 
 function ensureRules() {
   rules ||= loadRules(RULES_PATH);
@@ -155,6 +155,7 @@ ${contractNote()}`,
   let messages = [...stable, mutableTail()];
   let call = null;
   let result = null;
+  let firstHash = null;
 
   while (attempt <= 2) {
     ctx.ui?.notify?.(`DM turn, attempt ${attempt}...`, 'info');
@@ -165,6 +166,16 @@ ${contractNote()}`,
       continue;
     }
     call = proposal;
+    // Identical-hash early-out (tools.md §3): one retry per round, and if the retry proposes the
+    // same mutations as the first attempt it learned nothing - stop and take the deterministic
+    // fallback instead of spending a gate and a decode on a repeat. `result` stays the first
+    // attempt's rejection, so the fallback below runs on this call.
+    const hash = mutationHash(call.mutations);
+    if (firstHash !== null && hash === firstHash) {
+      ctx.ui?.notify?.('retry repeats the first attempt verbatim - taking the fallback', 'warn');
+      break;
+    }
+    if (firstHash === null) firstHash = hash;
     result = resolveRound(g, call, { mode: 'strict', rules_refs: needed.refs });
     if (result.ok) break;
     // Reject loudly, then give the model its errors back with the allowed values attached.
@@ -223,7 +234,7 @@ function statusLine(g) {
   const slots = [1, 2, 3, 4].map((s) => {
     const c = g.characters[s];
     if (!c) return `${s}:-`;
-    const ready = g.intents.find((i) => i.slot === s) ? 'spoke' : afk.has(s) ? 'afk' : 'quiet';
+    const ready = g.intents.find((i) => i.slot === s) ? 'spoke' : skipped.has(s) ? 'skipped' : 'quiet';
     const items = Object.keys(c.inventory).map((id) => g.items[id].name);
     return `${s}:${c.name} L${c.level} ${ready} [${items.join(', ') || 'empty'}]`;
   });
@@ -252,6 +263,10 @@ export default function (pi) {
 
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (!game) return { content: [{ type: 'text', text: 'NO_CAMPAIGN: start one with /dm_new' }] };
+      // Advance the round and re-seed the contention order, exactly as /dm_round does: the
+      // interactive tool IS a round, so it must consume a round number and a fresh order seed.
+      // Without this the round and order seed never advance on the interactive path.
+      setIntents(game, game.intents.filter(Boolean).map((i) => ({ ...i })), {});
       const res = resolveRound(game, params, { mode: 'strict', rules_refs: rulesForCall(game, params.mutations || []).refs });
       queueArt(game, res.art_jobs, ctx);
       const text = res.ok
@@ -267,7 +282,7 @@ export default function (pi) {
     handler: async (args, ctx) => {
       const campaign = (args || '').trim() || `campaign-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}`;
       game = newGame(ensureRules(), { campaign });
-      afk = new Set();
+      skipped = new Set();
       ctx.ui.notify(`/dm_join <1-4> <name> <class> to seat players. /dm_round to play.`, 'info');
       ctx.ui.notify(statusLine(game), 'info');
       persist(ctx, game);
@@ -326,20 +341,23 @@ export default function (pi) {
     },
   });
 
-  pi.registerCommand('dm_afk', {
-    description: 'Auto-skip a slot every round (AFK player): /dm_afk 3',
+  // Per-slot auto-skip, named dm_skip on purpose: the old name dm_afk collided with the
+  // Pi-Stunkus bridge's AFK mode (Blarmo away from the keyboard), which is a different thing
+  // entirely and lives in another repo. This one only ever means "this player slot is absent".
+  pi.registerCommand('dm_skip', {
+    description: 'Auto-skip a slot every round (absent player): /dm_skip 3',
     handler: async (args, ctx) => {
       if (!game) return ctx.ui.notify('Start with /dm_new', 'error');
       const slot = Number((args || '').trim());
-      if (!Number.isInteger(slot)) return ctx.ui.notify('usage: /dm_afk <1-4>', 'error');
-      if (afk.has(slot)) { afk.delete(slot); return ctx.ui.notify(`slot ${slot} is back`, 'info'); }
-      afk.add(slot);
-      ctx.ui.notify(`slot ${afkLabel(slot)} goes AFK - the DM narrates over them`, 'info');
+      if (!Number.isInteger(slot)) return ctx.ui.notify('usage: /dm_skip <1-4>', 'error');
+      if (skipped.has(slot)) { skipped.delete(slot); return ctx.ui.notify(`slot ${slot} is back`, 'info'); }
+      skipped.add(slot);
+      ctx.ui.notify(`slot ${slotLabel(slot)} is now skipped - the DM narrates over them`, 'info');
     },
   });
 
   pi.registerCommand('dm_round', {
-    description: 'Run one round, or n rounds: /dm_round [n]. AFK slots auto-skip.',
+    description: 'Run one round, or n rounds: /dm_round [n]. Skipped slots auto-skip.',
     getArgumentCompletions: (prefix) => {
       const items = ['1', '2', '5', '10'].map((v) => ({ value: v, label: `rounds: ${v}` }));
       const f = items.filter((i) => i.value.startsWith(prefix));
@@ -349,8 +367,8 @@ export default function (pi) {
       if (!game) return ctx.ui.notify('Start with /dm_new', 'error');
       const n = Math.min(20, Math.max(1, Number((args || '').trim()) || 1));
       for (let r = 0; r < n; r++) {
-        // AFK slots never owe an intent; everyone else is expected to have used /dm_intent.
-        const quiet = [1, 2, 3, 4].filter((s) => game.characters[s] && !afk.has(s) && !game.intents.find((i) => i.slot === s));
+        // Skipped slots never owe an intent; everyone else is expected to have used /dm_intent.
+        const quiet = [1, 2, 3, 4].filter((s) => game.characters[s] && !skipped.has(s) && !game.intents.find((i) => i.slot === s));
         if (quiet.length) ctx.ui.notify(`slots ${quiet.join(', ')} issued no intent - the tracker treats them as silent, not absent`, 'info');
         setIntents(game, game.intents.filter(Boolean).map((i) => ({ ...i })), {});
         const { call, result } = await runTurn(game, ctx);
@@ -420,7 +438,7 @@ export default function (pi) {
   pi.registerEntryRenderer?.('dm-narration', (entry) => `GM: ${entry.content}`);
 }
 
-function afkLabel(slot) {
+function slotLabel(slot) {
   return game?.characters?.[slot]?.name || `slot ${slot}`;
 }
 

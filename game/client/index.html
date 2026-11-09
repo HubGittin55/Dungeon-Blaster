@@ -326,5 +326,99 @@ async function demo() {
 }
 setTimeout(demo, 400);
 </script>
+
+<!-- ── Settings ───────────────────────────────────────────────────────────────────────────────
+     Self-contained and appended at the end of <body> rather than woven into the page markup, so
+     it works whatever the surrounding HUD looks like. It only controls the art style.
+
+     What the setting does and does not do: it changes which style directory the resolver PREFERS.
+     Anything already drawn keeps the style it was drawn with, because every asset carries its own
+     style - that is what pre-generation buys (an item never changes appearance mid-session) and it
+     is why the panel shows what is actually rendered rather than promising a live restyle.
+───────────────────────────────────────────────────────────────────────────────────────────── -->
+<div id="db-gear" title="Settings" role="button" tabindex="0">&#9881;</div>
+<div id="db-settings" hidden>
+  <div id="db-set-card">
+    <div id="db-set-head"><b>Art style</b><span id="db-set-close" role="button" tabindex="0">&times;</span></div>
+    <div id="db-set-body">Loading&hellip;</div>
+    <div id="db-set-foot"><span id="db-set-note"></span><button id="db-set-apply">Apply</button></div>
+  </div>
+</div>
+<style>
+  #db-gear{position:fixed;right:18px;top:14px;z-index:60;width:42px;height:42px;border-radius:50%;
+    display:grid;place-items:center;font-size:22px;cursor:pointer;color:#e8d8a8;user-select:none;
+    background:radial-gradient(circle at 35% 30%,#3a2f22,#171310);border:1px solid #6b5333;
+    box-shadow:0 0 18px #000a,inset 0 0 10px #0008}
+  #db-gear:hover{color:#fff3cf;border-color:#c8a35a}
+  #db-settings{position:fixed;inset:0;z-index:61;background:#000a;display:grid;place-items:center}
+  #db-set-card{width:min(560px,92vw);max-height:82vh;overflow:auto;background:linear-gradient(#1d1813,#120f0c);
+    border:1px solid #6b5333;border-radius:10px;box-shadow:0 22px 60px #000c;color:#e8dcc2;font:15px/1.45 Georgia,serif}
+  #db-set-head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;
+    border-bottom:1px solid #4a3a25;font-size:19px;color:#f0dfae}
+  #db-set-close{font-size:24px;cursor:pointer;line-height:1;color:#a98f63}
+  #db-set-body{padding:8px 18px}
+  .db-style{display:grid;grid-template-columns:22px 1fr;gap:12px;align-items:start;padding:12px 6px;
+    border-bottom:1px solid #33291d;cursor:pointer}
+  .db-style input{margin-top:4px;accent-color:#c8a35a}
+  .db-style .lbl{font-weight:bold;color:#f2e6c4}
+  .db-style .meta{font-size:12.5px;color:#a4906c;margin-top:3px}
+  .db-style .none{color:#c07a5a}
+  .db-style[data-off="1"]{opacity:.55}
+  #db-set-foot{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 18px;
+    border-top:1px solid #4a3a25;font-size:12.5px;color:#a4906c}
+  #db-set-apply{background:linear-gradient(#c8a35a,#8a6d33);color:#1a1409;border:0;border-radius:6px;
+    padding:8px 16px;font:600 14px Georgia,serif;cursor:pointer}
+  #db-set-apply:disabled{opacity:.45;cursor:default}
+</style>
+<script>
+(() => {
+  const gear = document.getElementById('db-gear');
+  const panel = document.getElementById('db-settings');
+  const bodyEl = document.getElementById('db-set-body');
+  const note = document.getElementById('db-set-note');
+  const apply = document.getElementById('db-set-apply');
+  let cfg = null, pick = null;
+
+  const show = (on) => { panel.hidden = !on; if (on) load(); };
+  async function load() {
+    try { cfg = await (await fetch('/api/settings')).json(); }
+    catch (e) { bodyEl.textContent = 'Settings server unreachable: ' + e.message; return; }
+    pick = cfg.style;
+    bodyEl.innerHTML = '';
+    for (const st of cfg.styles) {
+      const row = document.createElement('label');
+      row.className = 'db-style';
+      const off = st.rendered === 0;
+      if (off) row.dataset.off = '1';
+      row.innerHTML = `<input type="radio" name="dbstyle" value="${st.key}">
+        <span><span class="lbl">${st.label}</span>
+        <span class="meta">${st.engine} &middot; ${st.note || ''}</span>
+        <span class="meta${off ? ' none' : ''}">${st.rendered} asset${st.rendered === 1 ? '' : 's'} rendered${off ? ' &mdash; choosing it serves other styles' art instead' : ''}</span></span>`;
+      row.querySelector('input').checked = st.key === cfg.style;
+      row.querySelector('input').onchange = () => { pick = st.key; apply.disabled = pick === cfg.style; load_note(); };
+      bodyEl.appendChild(row);
+    }
+    apply.disabled = true;
+    load_note();
+  }
+  function load_note() {
+    const st = cfg.styles.find((x) => x.key === pick);
+    note.textContent = st && st.rendered === 0
+      ? 'Nothing rendered in this style yet. Art falls back and is marked.'
+      : `Serving ${pick}: ${st.rendered} assets.`;
+  }
+  apply.onclick = async () => {
+    apply.disabled = true; apply.textContent = 'Applying…';
+    const r = await (await fetch('/api/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ style: pick }) })).json();
+    cfg = r; pick = r.style; apply.textContent = 'Apply';
+    note.textContent = r.changed ? 'Applied. Newly served art prefers ' + r.style + '; cards already shown keep their own style.' : 'Already applied.';
+    for (const row of bodyEl.querySelectorAll('input')) row.checked = row.value === r.style;
+  };
+  gear.onclick = () => show(true);
+  document.getElementById('db-set-close').onclick = () => show(false);
+  panel.onclick = (e) => { if (e.target === panel) show(false); };
+  addEventListener('keydown', (e) => { if (e.key === 'Escape') show(false); });
+})();
+</script>
 </body>
 </html>

@@ -42,3 +42,5 @@ __pycache__/
 *.bin
 models/
 
+# Which art style THIS machine chose. Mutable per-machine state, not content.
+game/art/settings.json

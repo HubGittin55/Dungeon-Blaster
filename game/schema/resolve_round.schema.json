@@ -1,57 +1,66 @@
 {
- "type": "object",
- "properties": {
-  "narration": {
-   "type": "string",
-   "description": "Spoken consequence of the applied mutations. Pure text: no state, no rules, no numbers the tracker did not produce."
-  },
-  "mutations": {
-   "type": "array",
-   "description": "Applied by the deterministic tracker as soon as this array closes, BEFORE any of the narration is voiced. Every entry must be valid or the whole round is rejected.",
-   "items": {
-    "type": "object",
-    "properties": {
-     "id": {
+  "type": "object",
+  "properties": {
+    "narration": {
       "type": "string",
-      "description": "stable id within this round, e.g. m1"
-     },
-     "tool": {
-      "type": "string",
-      "description": "tracker tool name, e.g. spend, craft, damage, give, move"
-     },
-     "actor": {
-      "type": [
-       "integer",
-       "null"
-      ],
-      "description": "party slot 1-4, monster index, or null for the world"
-     },
-     "intent": {
-      "type": [
-       "string",
-       "null"
-      ],
-      "description": "short player-facing intent string; never authority over state"
-     },
-     "args": {
-      "type": "object",
-      "description": "tool arguments; the tracker validates and may reject"
-     }
+      "description": "Spoken consequence of the mutations the tracker will have applied. Pure prose: no state, no rules text, and no number the tracker did not produce. Say it before the mutations, because it is voiced while they are still being generated."
     },
-    "required": [
-     "id",
-     "tool",
-     "actor",
-     "args"
-    ],
-    "additionalProperties": false
-   }
-  }
- },
- "required": [
-  "narration",
-  "mutations"
- ],
- "additionalProperties": false,
- "description": "Emission order: narration BEFORE mutations, so TTS can start while the mutations are still being generated. The gate applies nothing until the whole object parses, so this buys 3.1-6.8s of spoken latency and costs nothing (notes/voice-stack.md). Key order is the order of `properties`, not of `required` - the grammar walks properties. Never add a non-property key to `properties` (a `_note` key there becomes a field the model must emit)."
+    "mutations": {
+      "type": "array",
+      "description": "Applied by the deterministic tracker as soon as this array closes, BEFORE any of the narration is voiced. Every entry must be valid or the whole round is rejected.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "stable id within this round, e.g. m1"
+          },
+          "tool": {
+            "type": "string",
+            "description": "Name one of the 7 tools the tracker implements, exactly. These are ALL of them: craft_item, take_item, drop_item, transfer_item, move_to, award_xp, introduce_npc. There is no damage, spend, give, craft, heal, attack or move tool - a roll is theatre, harm is a narration the gate never sees, and XP is award_xp. An unknown name rejects the whole round.",
+            "enum": [
+              "craft_item",
+              "take_item",
+              "drop_item",
+              "transfer_item",
+              "move_to",
+              "award_xp",
+              "introduce_npc"
+            ]
+          },
+          "actor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Party slot 1-4 for a mutation done BY a player, or null for the world (introduce_npc, party XP)."
+          },
+          "intent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The id of ONE entry from the intent table in the prompt, e.g. i1. Copy it; prose in this field is not authority and a mutation whose actor has no matching intent is rejected NO_INTENT."
+          },
+          "args": {
+            "type": "object",
+            "description": "Arguments for this tool only, as a JSON object. craft_item: name, item_type (weapon|armour|tool|consumable), materials [{name,qty}] drawn from the ACTOR's own materials. take_item/drop_item/transfer_item: item and slot (transfer also to_slot). move_to: location. award_xp: amount with either slot 1-4 or party true. introduce_npc: name, role, portrait true. Anything not named by the rules is rejected with the allowed values attached."
+          }
+        },
+        "required": [
+          "id",
+          "tool",
+          "actor",
+          "args"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "narration",
+    "mutations"
+  ],
+  "additionalProperties": false,
+  "description": "Emission order: narration BEFORE mutations, so TTS can start while the mutations are still being generated. The gate applies nothing until the whole object parses, so this buys 3.1-6.8s of spoken latency and costs nothing (notes/voice-stack.md). Key order is the order of `properties`, not of `required` - the grammar walks properties. Never add a non-property key to `properties` (a `_note` key there becomes a field the model must emit)."
 }

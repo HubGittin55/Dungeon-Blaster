@@ -24,6 +24,8 @@ import { loadRules } from '../tracker/rules_doc.js';
 import { newGame, joinSlot, addMaterials, setIntents, saveGame } from '../tracker/engine.js';
 import { runTurn, loadSchema, barkFor, RULES_PATH, ROOT, SLOT_NAMES, STARTING_KIT } from './gm.mjs';
 import { loadArt } from './art.mjs';
+import { ART_STYLES, DEFAULT_STYLE, resolveStyle } from './art/styles.mjs';
+import { readFile as readText, writeFile as writeText } from 'node:fs/promises';
 
 const PORT = Number(process.env.DB_GAME_PORT || 8765);
 const HOST = '127.0.0.1';
@@ -33,12 +35,27 @@ const ASR_URL = process.env.DB_ASR_URL || 'http://127.0.0.1:8081';
 const ART_URL = process.env.DB_ART_URL || 'http://127.0.0.1:8188';
 const ART_TEMPLATE = process.env.DB_ART_TEMPLATE || join(ROOT, 'game/art/anima_card_api.json');
 const ART_DIR = join(ROOT, 'game/art');
-const ART_STYLE = process.env.DB_ART_STYLE || 'shinkai';
+const ART_STYLE = process.env.DB_ART_STYLE || DEFAULT_STYLE;
 // Pre-generated art is the normal path; ComfyUI is a build-time tool. Live rendering stays available for
 // the improvised stuff, but only when someone asks for it by name, because a render in the middle of a
 // spoken line steals the card from TTS.
 const art = loadArt(ART_DIR, ART_STYLE, { log: (m) => console.log(`[art] ${m}`) });
 const ART_LIVE = process.env.DB_ART_LIVE === '1';
+// Art style is a live setting, not a restart. Note what it does and does not do: it changes which style
+// directory the resolver PREFERS. Assets already on screen keep the style they were drawn with, because
+// every asset carries its own style - that is a property of pre-generation, not a bug to paper over.
+const SETTINGS_PATH = join(ART_DIR, 'settings.json');
+let artStyle = ART_STYLE;
+try { artStyle = resolveStyle(JSON.parse(await readText(SETTINGS_PATH, 'utf8')).style).key; } catch { /* first run, no settings yet */ }
+async function saveSettings() { try { await writeText(SETTINGS_PATH, JSON.stringify({ style: artStyle }, null, 1)); } catch (e) { console.log(`[settings] could not persist: ${e.message}`); } }
+function settingsPayload() {
+  const have = art.byStyle();
+  return {
+    style: artStyle,
+    available: have,
+    styles: ART_STYLES.map((x) => ({ key: x.key, label: x.label, rank: x.rank, engine: x.engine || 'anima', note: x.note, rendered: have[x.key] || 0 })),
+  };
+}
 const CLIENT = join(ROOT, 'game/client');
 const D20 = join(ROOT, 'spikes/d20');
 const HOSTS = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
@@ -73,8 +90,10 @@ function speak(text, voice = 'dm') {
 async function renderArt(job) {
   // Manifest first, in --fake-dm too: a manifest hit is the difference between a demo with pictures in it
   // and a demo of grey boxes, and it costs a file check.
-  const pre = art.resolve(job);
-  if (pre) return { job, url: pre.url, pregen: true, asset: pre.id };
+  const pre = art.resolve(job, { style: artStyle });
+  // style_matches is reported upward rather than hidden: asking for shinkai and being served finnstark is
+  // correct behaviour (nothing else is rendered) and a lie by omission the player cannot debug.
+  if (pre) return { job, url: pre.url, pregen: true, asset: pre.id, style: pre.style, style_matches: pre.style_matches };
   const rec = await art.miss(job);
   if (!ART_LIVE) return { job, url: null, why: `${rec.why}; queued in game/art/queue.jsonl (set DB_ART_LIVE=1 to render now)` };
   if (!existsSync(ART_TEMPLATE)) return { job, url: null, why: 'no ComfyUI workflow template (game/art/anima_card_api.json)' };
@@ -317,6 +336,24 @@ const server = createServer(async (req, res) => {
     }
 
     if (path.startsWith('/d20/')) return file(res, join(D20, normalize(path.slice(5))));
+    if (path === '/api/settings' && req.method === 'GET') return json(res, 200, settingsPayload());
+    if (path === '/api/settings' && req.method === 'POST') {
+      // body() hands back a Buffer (line 290 parses the same way); treating it as an object is how the
+      // first version of this handler answered a perfectly good POST with a 400.
+      let b; try { b = JSON.parse((await body(req)).toString('utf8') || '{}'); } catch { return json(res, 400, { error: 'body must be JSON' }); }
+      // A missing or non-string style is a broken request, not a request to go back to the default. The
+      // first version of this fell through resolveStyle's graceful fallback and happily persisted one, so a
+      // malformed POST (a truncated body, a bad quote in a shell) silently restyled the game and wrote it to
+      // disk. Falling back is for a save that names a style this build dropped, and that stays visible.
+      if (!b || typeof b.style !== 'string' || !b.style.trim()) return json(res, 400, { error: 'style (string) required' });
+      const known = ART_STYLES.some((x) => x.key === b.style);
+      const key = resolveStyle(b.style).key;
+      if (!known) console.log(`[settings] "${b.style}" is not a style in this build - falling back to ${key}`);
+      const changed = key !== artStyle;
+      artStyle = key;
+      if (changed) await saveSettings();
+      return json(res, 200, { ok: true, changed, requested: b.style, fell_back: !known, ...settingsPayload() });
+    }
     if (path.startsWith('/art/')) {
       const f = resolve(join(ART_DIR, normalize(path.slice(5))));
       if (f !== resolve(ART_DIR) && !f.startsWith(resolve(ART_DIR) + sep)) return json(res, 403, { error: 'art path must stay inside game/art' });

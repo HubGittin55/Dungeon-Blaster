@@ -6,7 +6,13 @@
 // iterating on a bad card does not need a server restart.
 import { readFile, appendFile, mkdir } from 'node:fs/promises';
 import { existsSync, statSync, readFileSync } from 'node:fs';
-import { join, normalize, resolve, sep } from 'node:path';
+import { join, normalize, sep } from 'node:path';
+// Aliased on purpose. The module declares a function called resolve() below, function declarations hoist,
+// and an unaliased import meant resolve(artRoot) on the next lines was calling THE ART RESOLVER with a path
+// string: it returned null, null !== null is false, the && short-circuited, and the traversal guard never
+// fired once - while legitimate paths still worked by accident. Import resolve, shadow resolve, ship a
+// guard made of confetti.
+import { resolve as pathResolve } from 'node:path';
 
 const slug = (s) => String(s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 
@@ -58,28 +64,34 @@ export function loadArt(artRoot, styleKey, { log = () => {} } = {}) {
     return cache;
   }
 
-  /** @returns {{url:string,file:string,id:string}|null} */
-  function resolve(job) {
+  /**
+   * @param style optional preferred style directory; the manifest mixes styles because it merges by id
+   * @returns {{url:string,file:string,id:string,style:string,style_matches:boolean}|null}
+   */
+  function resolve(job, opts = {}) {
     const c = read();
     if (!c.loaded) return null;
-    for (const id of candidateIds(job)) {
-      const a = c.map.get(id);
-      if (!a) continue;
-      const file = join(artRoot, normalize(a.file));
-      // A manifest entry that escapes the art directory is a bug in whatever wrote it, and the answer is
-      // to refuse loudly rather than to serve /etc/passwd with a smile.
-      // Compare RESOLVED forms. Comparing strings is what broke first time: the caller passes
-      // "C:/repo/game/art", join() hands back "C:\repo\game\art\shinkai\mat_iron.png", and a prefix test
-      // against the un-normalised root refused the one asset the manifest was right about - so the guard
-      // designed to stop traversal became a guard that stopped the art.
-      const rootAbs = resolve(artRoot);
-      const target = resolve(file);
-      if (target !== rootAbs && !target.startsWith(rootAbs + sep)) {
-        log(`refusing art path outside the art dir: ${a.file}`);
-        return null;
+    const want = opts.style || c.style;
+    const ids = candidateIds(job);
+    // Two passes: the requested style first, then anything that exists at all. A style whose batch has not
+    // been rendered must not look like a missing asset, and it must not pretend the style applied either -
+    // callers get `style` (what actually served) and `style_matches` and decide what the player is told.
+    for (const pass of [0, 1]) {
+      for (const id of ids) {
+        const a = c.map.get(id);
+        if (!a) continue;
+        const inStyle = !want || String(a.file).startsWith(`${want}/`);
+        if (pass === 0 ? !inStyle : inStyle) continue;
+        const file = join(artRoot, normalize(a.file));
+        const rootAbs = pathResolve(artRoot);
+        const target = pathResolve(file);
+        if (target !== rootAbs && !target.startsWith(rootAbs + sep)) {
+          log(`refusing art path outside the art dir: ${a.file}`);
+          return null;
+        }
+        if (!existsSync(file)) { log(`manifest lists ${id} but the file is gone: ${a.file}`); return null; }
+        return { url: `/art/${a.file}`, file, id, style: String(a.file).split('/')[0], style_matches: inStyle };
       }
-      if (!existsSync(file)) { log(`manifest lists ${id} but the file is gone: ${a.file}`); return null; }
-      return { url: `/art/${a.file}`, file, id };
     }
     return null;
   }
@@ -96,7 +108,15 @@ export function loadArt(artRoot, styleKey, { log = () => {} } = {}) {
     return rec;
   }
 
-  return { resolve, miss, reload: () => read(true), get status() { const c = read(); return { loaded: c.loaded, assets: c.map.size, style: c.style, why: c.why }; } };
+  /** How many rendered assets each style actually has. The menu reads this and says "0 rendered"
+   *  rather than offering a style that would silently serve another style's pictures. */
+  function byStyle() {
+    const c = read(); const out = {};
+    for (const a of c.map.values()) { const k = String(a.file).split('/')[0]; out[k] = (out[k] || 0) + 1; }
+    return out;
+  }
+
+  return { resolve, miss, byStyle, reload: () => read(true), get status() { const c = read(); return { loaded: c.loaded, assets: c.map.size, style: c.style, why: c.why }; } };
 }
 
 // readFileSync comes from node:fs with the other sync friends; there is no second loader here, and the

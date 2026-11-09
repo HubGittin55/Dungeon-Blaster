@@ -63,6 +63,16 @@ const MATERIAL_ART = {
   'kings-oath-stone': 'a worn river stone with a carved crown worn smooth', 'worldroot-splinter': 'a pale splinter of living root, damp and fibrous',
   'starfall-core': 'a meteoric core, pitted and still warm at the cracks',
 };
+// One lettering description for the whole set. Blarmo's point: name the font in the prompt and the text
+// elements stop looking like five different typefaces that wandered in from other games. It is derived
+// from the words the shipped title was actually rendered with, so composing a prompt from it reproduces
+// ui_title_logo byte for byte (asserted, not assumed) and any NEW text asset inherits the same lettering
+// instead of inventing one.
+const LETTERING = 'carved angular fantasy lettering, brass rivets';
+// The one instruction that keeps baked text usable: say what the text IS and forbid everything else, or
+// the model adds a subtitle, a tagline, or a rune that reads as neither.
+const TEXT_RULES = ', exactly that text and no other text, no subtitle';
+
 const ui = (w, h, prompt, opt = {}) => ({ w, h, prompt, ...opt });
 const UI_ASSETS = {
   // Backdrops are the only opaque kind: a backdrop with an alpha channel is a backdrop with holes in it.
@@ -71,7 +81,7 @@ const UI_ASSETS = {
   // The one place baked lettering is right: a title. It never changes, never gets localised, and this
   // model draws text accurately, so it is free production value. Every label that CAN change stays in the
   // DOM, because a PNG cannot say "3 of 4 players joined".
-  ui_title_logo: ui(1024, 512, 'game title logo reading DUNGEON BLASTER in carved angular fantasy lettering, brass rivets, a d20 replacing the A, bold black outline, one flat cast shadow, exactly that text and no other text, no subtitle'),
+  ui_title_logo: ui(1024, 512, `game title logo reading DUNGEON BLASTER in ${LETTERING}, a d20 replacing the A, bold black outline, one flat cast shadow${TEXT_RULES}`),
   ui_panel_plate: ui(1024, 1024, 'ornate fantasy panel: worn leather frame with brass corners around an empty pale vellum centre, bold black outline, flat even light, empty centre with no text, no words, no lettering, no symbols'),
   ui_button_plate: ui(768, 256, 'horizontal polished bronze button plaque with beveled bold-outlined edges, empty face with no text, no words, no lettering, no symbols'),
   ui_divider_ornament: ui(1024, 192, 'thin horizontal band of carved grey stone with brass rivets and a subtle wave motif, bold black outline, flat even light, no words, no lettering'),

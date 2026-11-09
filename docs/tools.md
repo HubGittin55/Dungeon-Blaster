@@ -103,8 +103,25 @@ later slices; the vocabulary is deliberately small so the gate can be exhaustive
 | `award_xp` | slot or party | no | `slot` (or `party: true`), `amount`, `reason` |
 | `introduce_npc` | world | no | `name`, `role`, `portrait: true` (queues art) |
 
-**OPEN (from the architecture doc, still unresolved):** shared party XP vs individual levels; crafting
-gate checked on crafter vs owner when they differ; combat batched per initiative cycle vs per actor.
+**Resolved in code, and these were the three OPEN items from the architecture doc:**
+
+- **Shared party XP vs individual levels** — individual levels, party-wide awards. Each character carries
+  its own `level` on the XP curve with a level cap; `award_xp` takes `slot: 1-4` for one player or
+  `party: true` for all of them (`checkAwardXp`). An award aimed at an empty slot is `SLOT_UNKNOWN`, and an
+  award that would push a target past the cap is `BAD_ARGS` rather than a silent clamp.
+- **Crafting gate, crafter vs owner** — the **crafter**. `checkCraft` requires the materials to be in the
+  actor's own inventory (`MISSING_MATERIAL`, with a recipe hint for the item type). This is the rule the
+  wording of the tool made a guess about, so it is stated here: handing someone iron does not let them
+  forge with it, `transfer_item` comes first.
+- **Combat, batched per initiative cycle vs per actor** — still **OPEN, and unbuilt**. There is no combat
+  tool at all: no `damage`, no `attack`, no `heal`. Harm is narration, and the tracker records none of it.
+  Say that plainly to players rather than implying the DM is tracking hit points it cannot see.
+
+The tool vocabulary above is the whole set, and `resolve_round.schema.json` now carries it as an `enum`.
+That matters more than a doc fix: the schema's own `tool` description used to read "e.g. spend, craft,
+damage, give, move" — **not one of those five names exists** — and that string is handed to the model as
+the contract. Constrained decoding cannot emit a bad tool name now, which retires a whole class of
+`NO_TOOL` rejections for good.
 
 ## 5. Not the DM's tools
 
@@ -136,4 +153,6 @@ llama-server on `:8080`. Qwen3.5-35B-A3B and Qwen3.6-35B-A3B are not interchange
 | `resolve_round` emitted as a parseable native tool call | **verified 4/4**, auto and `tool_choice: required` |
 | narration-before-mutations key order held by the model | **verified 4/4** (and 20/20 in the schema-mode contract test) |
 | `response_format: json_object` is *not* sufficient | **verified 0/4** — the model echoes party state instead of answering |
-| gate, intent binding, contention, rejection payloads | **not built yet** — that is Slice 1 |
+| gate, intent binding, contention, rejection payloads | **built and under test** — `test/gate_test.js` is 30 assertions (evil-bot suite: bad material names, wrong actor, invented intent, duplicate ids, contention) and `test/turn_test.mjs` is 8 more over the shared turn in `game/gm.mjs`, driven by scripted DMs with no model, no GPU and no network |
+| the identical-retry early-out | **built and turn-tested** — `runTurn` takes an injectable `gate` so a test can count the gate *not* running. Mutation-checked: delete the early-out and the suite fails by name (`gate ran 2 times`). It had no such test when a refactor into `game/gm.mjs` silently dropped it with 107 tests green |
+| rules text as the single source of truth | **built** — `rules/rules.md` is loaded and hashed per round, `rules_refs` binds each mutation to the section that authorises it, and `pregen.mjs` reads its material list out of the same file |

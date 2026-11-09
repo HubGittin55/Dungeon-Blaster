@@ -197,11 +197,17 @@ function buildDie(radius, atlas) {
     const b = new THREE.Vector3().fromBufferAttribute(pos, f * 3 + 1);
     const c = new THREE.Vector3().fromBufferAttribute(pos, f * 3 + 2);
     const centroid = new THREE.Vector3().addVectors(a, b).add(c).multiplyScalar(1 / 3);
-    const normal = new THREE.Vector3().crossVectors(
+    const raw = new THREE.Vector3().crossVectors(
       new THREE.Vector3().subVectors(b, a), new THREE.Vector3().subVectors(c, a)
-    ).normalize();
-    if (normal.dot(centroid) < 0) normal.negate();          // outward, always
-    faces.push({ value: f + 1, centroid, normal });
+    );
+    const mirrored = raw.dot(centroid) < 0;                 // a->b->c winds CW seen from outside
+    const normal = raw.clone().normalize();
+    if (mirrored) normal.negate();                          // outward, always
+    // `up` is the direction from the face centre to vertex a, and vertex a is the vertex the atlas cell is
+    // drawn against. The number is only legible if the ease knows which way the glyph points, and up to now
+    // it did not: the die levelled the right face and left it spun however the maths happened to land it.
+    // `mirrored` is recorded so the self-test can report it instead of assuming the winding is uniform.
+    faces.push({ value: f + 1, centroid, normal, mirrored, up: new THREE.Vector3().subVectors(a, centroid).normalize() });
 
     // UVs, done properly. The first version handed the atlas triangle to the three vertices in index order,
     // which has nothing to do with where those vertices actually are - so the printed number came out in an
@@ -213,7 +219,7 @@ function buildDie(radius, atlas) {
     // in UV space, so the mapping preserves orientation and no number is ever mirrored. The glyph now reads
     // upright toward vertex a, the same way a moulded d20 reads toward one of its points.
     const cx = (f % cols) / cols, cy = Math.floor(f / cols) / (20 / cols);
-    const tri = [[0.50, 0.90], [0.09, 0.16], [0.91, 0.16]];
+    const tri = mirrored ? [[0.50, 0.90], [0.91, 0.16], [0.09, 0.16]] : [[0.50, 0.90], [0.09, 0.16], [0.91, 0.16]];
     for (let k = 0; k < 3; k++) {
       uv.setXY(f * 3 + k, cx + tri[k][0] / cols, cy + tri[k][1] / (20 / cols));
     }
@@ -453,7 +459,10 @@ export class DiceTable {
     this.onImpact = opts.onImpact || (() => {});
     this.log = [];
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    // preserveDrawingBuffer so the page can read its own canvas back. Without it the "is the die actually on
+    // screen?" check reads an empty buffer and reports a black page that is not black - and "the test page
+    // was just black" is the exact bug this buys a detector for.
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(container.clientWidth || 1280, container.clientHeight || 720);
     renderer.shadowMap.enabled = true;
@@ -597,9 +606,25 @@ export class DiceTable {
     const announced = this.die.faces.find((f) => f.value === this.target);
     const faceNormal = announced.normal.clone().applyQuaternion(q).normalize();
     const fix = new THREE.Quaternion().setFromUnitVectors(faceNormal, UP);
-    // A yaw flourish so the ease reads as "settling" rather than "snapping": spin about Y while the face
-    // tips up. Same endpoint, more motion to look at.
-    const yaw = new THREE.Quaternion().setFromAxisAngle(UP, (Math.random() - 0.5) * 0.7);
+    // LEVEL IS NOT LEGIBLE. setFromUnitVectors is the minimal rotation: it lays the announced face flat and
+    // leaves it turned by an arbitrary amount about +Y, and a number lying flat on a table can be perfectly
+    // level and still read upside down from the couch - which is how a build asserting PASS 25/25 shipped a
+    // settled 17 that a human reads upside down, and a 9 that reads as a 6. Flat text reads upright when the
+    // top of the glyph points away from the viewer, and on a printed d20 the top of the glyph is the apex
+    // vertex. So carry that apex through the level-out and yaw until it points away from the camera.
+    // The remaining jitter is a settle, not a spin: it stays inside the legibility angle the self-test asserts.
+    let apexYaw = 0;
+    const apex = announced.up.clone().applyQuaternion(fix);
+    const away = new THREE.Vector3(
+      this.body.p.x - this.camera.position.x, 0, this.body.p.z - this.camera.position.z
+    ).normalize();
+    const cur = new THREE.Vector3(apex.x, 0, apex.z);
+    if (cur.lengthSq() > 1e-8) {
+      cur.normalize();
+      apexYaw = Math.atan2(cur.z * away.x - cur.x * away.z, cur.dot(away));
+    }
+    const yaw = new THREE.Quaternion().setFromAxisAngle(UP, apexYaw + (Math.random() - 0.5) * 0.2);
+    this.easeApexYaw = apexYaw;
     this.easeFrom = q.clone();
     this.easeTo = yaw.multiply(fix).multiply(q).normalize();
     this.easeT = 0;
@@ -684,12 +709,22 @@ export class DiceTable {
     this.dust.step(dt);
     this.rings.step(dt);
 
-    // Damped lateral follow. The die skitters roughly 1.4 m and the frame is only so wide: the settled
-    // capture caught it leaving shot at the exact moment the number mattered. The camera leans toward it
-    // (55%) rather than chasing it (100%), so the table still reads as a place instead of a tracking shot.
+    this._updateCamera(dt);
+
+    if (!this.quiet) this.renderer.render(this.scene, this.camera);
+  }
+
+  // The camera used to live inline in _frame, which meant pump() - every single capture and every
+  // self-test frame - rendered with a camera that had never been told where the die was. The framing I
+  // checked in screenshots was not the framing a player gets, twice over: pump never ran the rig, and the
+  // two follow systems stacked on top of each other. One method, called from both paths, so what is
+  // captured is what is played.
+  _updateCamera(dt) {
+    // One follow, not two. There used to be an X-only lean here (camBase 55% / camLook 90%) sitting underneath
+    // the 3-axis rig below, and they added: the camera moved ~155% of the die's travel and looked ~190%, so
+    // the die drifted out of frame on the far side instead of the near one. The rig tracks all three axes, so
+    // the base stays put and this whole block is nothing.
     const engaged = this.state === 'idle' ? 0 : 1;
-    this.camBase.x += (this.body.p.x * 0.55 * engaged - this.camBase.x) * Math.min(1, dt * 2.4);
-    this.camLook.x += (this.body.p.x * 0.9 * engaged - this.camLook.x) * Math.min(1, dt * 3.0);
 
     // Track rig. The die leaves the throw line in whatever direction the seed likes; a fixed camera either
     // cropped it at the frame edge or let it roll clean out of shot, and the settled capture showed exactly
@@ -697,10 +732,14 @@ export class DiceTable {
     // while the table still moves under it.
     const eng = this.state === 'idle' ? 0 : 1;
     const px = this.body.p.x, pz = this.body.p.z;
-    this.camRig.x += (px * 0.5 * eng - this.camRig.x) * Math.min(1, dt * 2.4);
-    this.camRig.z += (pz * 0.45 * eng - this.camRig.z) * Math.min(1, dt * 2.4);
-    this.camAim.x += (px * 0.85 * eng - this.camAim.x) * Math.min(1, dt * 3.0);
-    this.camAim.z += (pz * 0.75 * eng - this.camAim.z) * Math.min(1, dt * 3.0);
+    // Full follow, damped. This used to be a partial follow (0.5 / 0.45), which meant a die that finished two
+    // metres away stayed two metres off centre - at 900x700 it sat half out of frame at the left edge, and a
+    // roll nobody can read is not a roll. The die stays framed at any window size now; the damping is what
+    // keeps it from feeling like a camera welded to the plastic, and the settle dip is what sells the stop.
+    this.camRig.x += (px * eng - this.camRig.x) * Math.min(1, dt * 2.4);
+    this.camRig.z += (pz * eng - this.camRig.z) * Math.min(1, dt * 2.4);
+    this.camAim.x += (px * eng - this.camAim.x) * Math.min(1, dt * 3.0);
+    this.camAim.z += (pz * eng - this.camAim.z) * Math.min(1, dt * 3.0);
 
     this.shake *= Math.max(0, 1 - dt * 7);
     this.camera.position.set(
@@ -709,8 +748,6 @@ export class DiceTable {
       this.camBase.z + this.camRig.z + (Math.random() - 0.5) * this.shake * 0.6
     );
     this.camera.lookAt(this.camLook.x + this.camAim.x, this.camLook.y, this.camLook.z + this.camAim.z);
-
-    if (!this.quiet) this.renderer.render(this.scene, this.camera);
   }
 
   // Deterministic fixed-step pump for capture and for the self-test. Returns when the promise from roll()
@@ -719,8 +756,13 @@ export class DiceTable {
     const n = Math.round(seconds / fixed);
     for (let i = 0; i < n; i++) {
       this.step(fixed);
+      this._updateCamera(fixed);   // same camera the live loop runs, or a capture proves nothing about framing
       if (!this.pending && this.state === 'settled') break;
     }
+    // The rig is damped, so a capture taken on the settling frame is a capture of a die still drifting into
+    // position. Give the camera its own short tail - no physics, no randomness beyond the shake decay - so the
+    // frame is the one a player would actually be looking at a moment later.
+    for (let i = 0; i < 45; i++) this._updateCamera(fixed);
     if (!this.quiet) this.renderer.render(this.scene, this.camera);
   }
 

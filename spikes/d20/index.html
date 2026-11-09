@@ -19,10 +19,7 @@
 window.__err = null;
 addEventListener('error', (e) => {
   window.__err = String(e.message || e.error) + ' at ' + String(e.filename || '?').split('/').pop() + ':' + e.lineno + ':' + e.colno;
-  const h = document.getElementById('hud'); if (h) h.textContent = 'ERROR: ' + window.__err + '
-' + String(e.error && e.error.stack || '').split('
-').slice(0,4).join('
-');
+  const h = document.getElementById('hud'); if (h) h.textContent = 'ERROR: ' + window.__err + '\n' + String(e.error && e.error.stack || '').split('\n').slice(0,4).join('\n');
   document.title = 'PAGE_ERROR ' + window.__err;
 });
 addEventListener('unhandledrejection', (e) => {
@@ -32,6 +29,7 @@ addEventListener('unhandledrejection', (e) => {
 });
 </script>
 <script type=module>
+import * as THREE from 'three';
 import { DiceTable } from './d20.js';
 const Q = new URLSearchParams(location.search);
 const hud = document.getElementById('hud'), verdict = document.getElementById('verdict'), flashEl = document.getElementById('flash');
@@ -60,6 +58,48 @@ function thud(speed){
 let first = true;
 async function armAudio(){ if (first){ first = false; try { actx = new (window.AudioContext||window.webkitAudioContext)(); } catch {} } }
 
+// Is the announced number readable? Two ways a level die lies: the glyphs can be mirrored (UV winding), or
+// they can face the viewer instead of away from them (uncontrolled yaw). Both pass "up face == target".
+// Returns the tilt of the glyph's own up-direction as it lands on screen, in degrees, plus the mirror test.
+function legibility(t) {
+  const f = t.die.faces.find((x) => x.value === t.target);
+  if (!f) return { ang: 999, mir: null, upright: false };
+  const q = t.body.p ? t.body.q : t.body.q;
+  const n = f.normal.clone().applyQuaternion(q);
+  const glyphUp = f.up.clone().applyQuaternion(q).normalize();
+  const glyphRight = new THREE.Vector3().crossVectors(glyphUp, n).normalize();
+  const centre = f.centroid.clone().applyQuaternion(q).add(t.body.p);
+  const px = (v) => v.clone().project(t.camera);
+  const c = px(centre);
+  const tip = px(centre.clone().add(glyphUp.multiplyScalar(0.35)));
+  const rt = px(centre.clone().add(glyphRight.multiplyScalar(0.35)));
+  const dy = tip.y - c.y, dx = tip.x - c.x;                       // NDC: +y up, +x right
+  const ang = Math.atan2(Math.abs(dx), Math.max(1e-6, dy)) * 180 / Math.PI;
+  return {
+    ang,
+    mir: (rt.x - c.x) < 0,               // a correct glyph's right side lands to the right
+    upright: ang < 15 && n.y > 0.9,      // <15° off vertical, and the announced face genuinely near-up
+    faceUp: +n.y.toFixed(3),
+  };
+}
+
+// Read the canvas back. A page can hold a passing physics test, run at 60fps, and paint nothing at all - the
+// self-test used to run in quiet mode, where that is literally true and nothing noticed.
+function pixelCheck(t, w = 180, h = 140) {
+  const src = t.renderer.domElement;
+  const s = document.createElement('canvas'); s.width = w; s.height = h;
+  const x = s.getContext('2d');
+  x.drawImage(src, 0, 0, w, h);
+  const d = x.getImageData(0, 0, w, h).data;
+  let sum = 0, ink = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const l = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+    sum += l; if (l > 28) ink++;
+  }
+  const n = d.length / 4;
+  return { mean: +(sum / n).toFixed(1), inkPct: +(100 * ink / n).toFixed(1), ok: sum / n > 8 && ink / n > 0.15 };
+}
+
 const table = new DiceTable(document.getElementById('table'), {
   quiet: selftest,
   onStage: (stage, info) => {
@@ -67,9 +107,20 @@ const table = new DiceTable(document.getElementById('table'), {
     if (stage === 'landed') {
       hud.textContent = `tracker said ${info.target}   die shows ${info.landed}   ${info.agree ? 'AGREE' : '*** DISAGREEMENT ***'}   ${info.sim_s}s`;
       window.__last = info;
-      if (info.value === 20) flash('NAT 20', '#ffd76a');
-      else if (info.value === 1) flash('NAT 1', '#ff5a4a');
-      else flash('', '#f2ddab');
+      // Legibility is asserted, not admired. "up=17" was always true in the maths and still showed the player
+      // an upside-down 17, so the check has to be the one thing a player's eye does: does the announced face
+      // read the right way up, and is it the announced face. Measured by projecting the face centre and the
+      // glyph's apex into screen space and looking at which way the line between them points.
+      const L = legibility(table);
+      window.__leg = window.__leg || { n: 0, bad: [], worst: 0 };
+      window.__leg.n++;
+      window.__leg.worst = Math.max(window.__leg.worst, L.ang);
+      if (!(L.upright && L.mir === false)) window.__leg.bad.push({ v: info.target, ang: +L.ang.toFixed(1), mirrored: L.mir });
+      if (!selftest) {
+        if (info.value === 20) flash('NAT 20', '#ffd76a');
+        else if (info.value === 1) flash('NAT 1', '#ff5a4a');
+        else flash('', '#f2ddab');
+      }
     }
   },
   onImpact: (s) => thud(s),
@@ -98,15 +149,29 @@ if (selftest) {
     sims.push(done.sim_s);
     if (!done.agree || done.landed !== v) fails.push({ v, seed, landed: done.landed });
   }
-  const pass = fails.length === 0;
-  document.title = pass ? `SELFTEST PASS ${vals.length}/${vals.length}` : `SELFTEST FAIL ${fails.length}/${vals.length}`;
+  // Turn the renderer back on for one last roll and read the canvas back. The self-test runs in quiet mode,
+  // which is exactly why a page that paints nothing at all could report PASS - "the test page was just black"
+  // needed a detector, not a screenshot I hoped was good.
+  table.quiet = false;
+  window.__last = null;
+  table.roll({ value: 17, seed: 4242 });
+  table.pump(8);
+  const px = pixelCheck(table);
+  const leg = window.__leg || { n: 0, bad: [], worst: 0 };
+  const mir = table.die.faces.filter((f) => f.mirrored).length;
+  const pass = fails.length === 0 && leg.bad.length === 0 && px.ok && mir === 0;
+  document.title = pass
+    ? `SELFTEST PASS ${vals.length}/${vals.length}`
+    : `SELFTEST FAIL disagree=${fails.length} illegible=${leg.bad.length} pixel=${px.ok ? 'ok' : 'BLACK'} mirrored=${mir}`;
   const worst = sims.length ? Math.max(...sims).toFixed(2) : '-';
   const med = sims.length ? sims.slice().sort((a,b)=>a-b)[sims.length>>1].toFixed(2) : '-';
   hud.textContent = `${document.title}
-settle time  median ${med}s  worst ${worst}s
-mismatches: ${fails.length ? JSON.stringify(fails) : 'none'}
-physics never decides the number - the tracker does, and the die is eased onto it`;
-  window.__done = { pass, fails, sims };
+rolls ${vals.length}   settle median ${med}s  worst ${worst}s
+legible ${leg.n - leg.bad.length}/${leg.n}   worst tilt ${leg.worst.toFixed(1)}deg   mirrored faces ${mir}/${table.die.faces.length}
+canvas  mean luma ${px.mean}  ink ${px.inkPct}%  ${px.ok ? 'DRAWING' : 'BLACK - nothing on screen'}
+mismatches: ${fails.length ? JSON.stringify(fails) : 'none'}   illegible: ${leg.bad.length ? JSON.stringify(leg.bad) : 'none'}
+physics never decides the number - the tracker does, and the die is eased onto it and turned to face you`;
+  window.__done = { pass, fails, sims, leg, px, mirroredFaces: mir };
 } else if (shotAt !== null) {
   // Deterministic single frame for capture: same seed, same frame, no rAF, no clock.
   const v = parseInt(Q.get('value') || '17', 10), seed = parseInt(Q.get('seed') || '4242', 10);
@@ -116,11 +181,18 @@ physics never decides the number - the tracker does, and the die is eased onto i
   hud.textContent = document.title + (done ? `  landed=${done.landed}` : '');
   window.__done = { shotAt, v, state: table.state };
 } else {
-  hud.textContent = 'click or SPACE to roll   (audio needs the click)';
-  const go = async () => { await armAudio(); if (table.state === 'idle' || table.state === 'settled') table.roll({ value: 1 + Math.floor(Math.random()*20), seed: (Math.random()*1e9)|0 }); };
+  // A caller may hand us the number with ?value=N, and that is the only acceptable source of it. The game
+  // client always does: physics is theatre, the tracker owns the result, and a page that minted its own
+  // die roll inside the game would be exactly the lie the spike's self-test exists to catch.
+  const forced = Q.has('value') ? Math.min(20, Math.max(1, parseInt(Q.get('value'), 10) || 1)) : null;
+  const seed0 = Q.has('seed') ? (parseInt(Q.get('seed'), 10) | 0) : ((Math.random() * 1e9) | 0);
+  hud.textContent = forced !== null
+    ? `the tracker says ${forced} - the die only performs it`
+    : 'click or SPACE to roll   (audio needs the click)';
+  const go = async () => { await armAudio(); if (table.state === 'idle' || table.state === 'settled') table.roll({ value: forced ?? 1 + Math.floor(Math.random() * 20), seed: forced !== null ? seed0 : (Math.random() * 1e9) | 0 }); };
   addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); go(); } });
   addEventListener('click', go);
   (function fps(){ hud.textContent += `\n${Math.round(table._fps)} fps`; requestAnimationFrame(fps); })();
-  if (Q.get('auto') === '1') go();
+  if (Q.get('auto') === '1' || forced !== null) go();
 }
 </script></body></html>

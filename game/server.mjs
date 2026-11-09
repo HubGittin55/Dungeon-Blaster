@@ -18,11 +18,12 @@ import { existsSync, statSync } from 'node:fs';
 // node:fs/promises, not node:fs: fs.readFile without a callback resolves to undefined, so every static
 // file "does not exist" and every 404 looks like a wrong path instead of a wrong import.
 import { readFile } from 'node:fs/promises';
-import { extname, join, normalize, resolve } from 'node:path';
+import {extname, join, normalize, resolve, sep } from 'node:path';
 import { randomUUID, randomInt } from 'node:crypto';
 import { loadRules } from '../tracker/rules_doc.js';
 import { newGame, joinSlot, addMaterials, setIntents, saveGame } from '../tracker/engine.js';
 import { runTurn, loadSchema, barkFor, RULES_PATH, ROOT, SLOT_NAMES, STARTING_KIT } from './gm.mjs';
+import { loadArt } from './art.mjs';
 
 const PORT = Number(process.env.DB_GAME_PORT || 8765);
 const HOST = '127.0.0.1';
@@ -31,6 +32,13 @@ const TTS_URL = process.env.DB_TTS_URL || '';
 const ASR_URL = process.env.DB_ASR_URL || 'http://127.0.0.1:8081';
 const ART_URL = process.env.DB_ART_URL || 'http://127.0.0.1:8188';
 const ART_TEMPLATE = process.env.DB_ART_TEMPLATE || join(ROOT, 'game/art/anima_card_api.json');
+const ART_DIR = join(ROOT, 'game/art');
+const ART_STYLE = process.env.DB_ART_STYLE || 'shinkai';
+// Pre-generated art is the normal path; ComfyUI is a build-time tool. Live rendering stays available for
+// the improvised stuff, but only when someone asks for it by name, because a render in the middle of a
+// spoken line steals the card from TTS.
+const art = loadArt(ART_DIR, ART_STYLE, { log: (m) => console.log(`[art] ${m}`) });
+const ART_LIVE = process.env.DB_ART_LIVE === '1';
 const CLIENT = join(ROOT, 'game/client');
 const D20 = join(ROOT, 'spikes/d20');
 const HOSTS = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
@@ -63,6 +71,12 @@ function speak(text, voice = 'dm') {
 
 /** ComfyUI. Returns a viewable URL, or null with a reason the UI can show instead of a blank card. */
 async function renderArt(job) {
+  // Manifest first, in --fake-dm too: a manifest hit is the difference between a demo with pictures in it
+  // and a demo of grey boxes, and it costs a file check.
+  const pre = art.resolve(job);
+  if (pre) return { job, url: pre.url, pregen: true, asset: pre.id };
+  const rec = await art.miss(job);
+  if (!ART_LIVE) return { job, url: null, why: `${rec.why}; queued in game/art/queue.jsonl (set DB_ART_LIVE=1 to render now)` };
   if (!existsSync(ART_TEMPLATE)) return { job, url: null, why: 'no ComfyUI workflow template (game/art/anima_card_api.json)' };
   if (FAKE) return { job, url: null, why: 'art skipped in --fake-dm (no model, no reason to burn the GPU)' };
   try {
@@ -303,6 +317,11 @@ const server = createServer(async (req, res) => {
     }
 
     if (path.startsWith('/d20/')) return file(res, join(D20, normalize(path.slice(5))));
+    if (path.startsWith('/art/')) {
+      const f = resolve(join(ART_DIR, normalize(path.slice(5))));
+      if (f !== resolve(ART_DIR) && !f.startsWith(resolve(ART_DIR) + sep)) return json(res, 403, { error: 'art path must stay inside game/art' });
+      return file(res, f);
+    }
     if (path === '/' || path === '/index.html') return file(res, join(CLIENT, 'index.html'));
     const guess = join(CLIENT, normalize(path));
     if (guess.startsWith(CLIENT) && existsSync(guess) && statSync(guess).isFile()) return file(res, guess);

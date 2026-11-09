@@ -23,7 +23,7 @@
   #die svg{width:100%;height:100%;filter:drop-shadow(0 1.4vmin 2vmin #000c)}
   #shadow{position:absolute;left:50%;bottom:-7vmin;width:26vmin;height:6vmin;transform:translateX(-50%) scale(.5);
     background:radial-gradient(50% 50% at 50% 50%,#000b,transparent 70%);opacity:.25}
-  #num{position:absolute;left:50%;top:47%;transform:translate(-50%,-50%);font-size:12.5vmin;font-weight:bold;
+  #num{position:absolute;left:50%;top:55%;transform:translate(-50%,-50%);font-size:12.5vmin;font-weight:bold;
     color:#ffe9b0;text-shadow:0 0 2.4vmin #ffb64855,0 .4vmin .8vmin #000;opacity:0;letter-spacing:-.02em}
   #crit{position:absolute;left:50%;top:72%;transform:translate(-50%,-50%);font-size:4vmin;letter-spacing:.3em;
     color:#ffd27a;opacity:0;text-transform:uppercase}
@@ -65,10 +65,14 @@
       </defs>
       <g stroke="#221a10" stroke-width="1.6" stroke-linejoin="round">
         <polygon points="50,2 93,26 93,66 50,90 7,66 7,26" fill="url(#b)"/>
-        <polygon points="50,2 93,26 50,44 7,26" fill="url(#c)"/>
-        <polygon points="50,44 93,26 93,66 50,90" fill="url(#a)"/>
-        <polygon points="50,44 7,26 7,66 50,90" fill="url(#b)" opacity=".82"/>
-        <polygon points="50,44 50,90 7,66" fill="#00000022" stroke="none"/>
+        <polygon points="50,2 93,26 93,66 50,90" fill="url(#c)" opacity=".62"/>
+        <polygon points="50,2 50,20 7,26" fill="url(#a)"/>
+        <polygon points="93,26 78,66 93,66" fill="#00000026" stroke="none"/>
+        <polygon points="50,90 22,66 78,66" fill="#00000033" stroke="none"/>
+        <polygon points="50,20 78,66 22,66" fill="url(#a)"/>
+      </g>
+      <g stroke="#221a10" stroke-width="1.6" stroke-linecap="round" fill="none">
+        <path d="M50,20 L7,26 M50,20 L93,26 M22,66 L7,66 M22,66 L50,90 M78,66 L93,66 M78,66 L50,90"/>
       </g>
     </svg>
     <div id="shadow"></div>

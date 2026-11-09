@@ -33,7 +33,7 @@
               "integer",
               "null"
             ],
-            "description": "Party slot 1-4 for a mutation done BY a player, or null for the world (introduce_npc, party XP)."
+            "description": "The party slot performing THIS mutation, 1-4. It must be the slot that issued the intent named in `intent`, and that is the single most common way a round gets rejected: take_item, drop_item and transfer_item are all performed by a player, so their actor is that player's slot, never null and never somebody else's. null means the world acted (introduce_npc, award_xp with party:true)."
           },
           "intent": {
             "type": [
@@ -44,7 +44,7 @@
           },
           "args": {
             "type": "object",
-            "description": "Arguments for this tool only, as a JSON object. craft_item: name, item_type (weapon|armour|tool|consumable), materials [{name,qty}] drawn from the ACTOR's own materials. take_item/drop_item/transfer_item: item and slot (transfer also to_slot). move_to: location. award_xp: amount with either slot 1-4 or party true. introduce_npc: name, role, portrait true. Anything not named by the rules is rejected with the allowed values attached."
+            "description": "Arguments for this tool only. craft_item: name, item_type (weapon|armour|tool|consumable), materials [{name,qty}] from the ACTOR's own materials. take_item: item. drop_item: item. transfer_item: item, to_slot (the giver is the actor, not an argument). move_to: location. award_xp: amount with either slot 1-4 or party true. introduce_npc: name, role, portrait true. Anything the rules do not name is rejected with the allowed values attached."
           }
         },
         "required": [

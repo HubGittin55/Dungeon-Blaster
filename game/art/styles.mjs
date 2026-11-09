@@ -7,17 +7,23 @@
 // painterly style arrives (Blarmo's note: Anima gives cartoon/anime without help, so that wants a
 // LoRA), it is an entry here plus a batch, not a new code path.
 export const ART_STYLES = [
-  { key: 'shinkai', rank: 1, label: 'Makoto Shinkai', tag: '@makoto_shinkai style',
-    note: 'ranked first; saturated light, clean linework' },
-  { key: 'bengal', rank: 2, label: 'Bengal comic', tag: 'Bengal comic illustration',
+  // New engine, new head of the table. Not comparable to the four below by rank: those were ranked on
+  // Anima renders at 640px, this is Qwen Image 2.1 at 1MP with real alpha and legible text. `engine` is
+  // recorded per style so a menu can grey out what the current build cannot render rather than pretending
+  // every style is reachable from every pipeline.
+  { key: 'finnstark', rank: 1, label: 'Anato Finnstark', tag: 'Anato Finnstark fantasy illustration with bold linework', engine: 'qwen-image',
+    note: 'chosen for the shipped set; bold ink outline, hatched tone, transparent cut-outs' },
+  { key: 'shinkai', rank: 2, label: 'Makoto Shinkai', tag: '@makoto_shinkai style', engine: 'anima',
+    note: 'ranked first of the Anima bake-off; saturated light, clean linework' },
+  { key: 'bengal', rank: 3, label: 'Bengal comic', tag: 'Bengal comic illustration', engine: 'anima',
     note: 'ranked second; not an @artist tag, a style phrase' },
-  { key: 'gerph', rank: 3, label: 'Gerph', tag: '@gerph style',
+  { key: 'gerph', rank: 4, label: 'Gerph', tag: '@gerph style', engine: 'anima',
     note: 'ranked third' },
-  { key: 'mini', rank: 4, label: 'Minillustration', tag: '@minillustration style',
+  { key: 'mini', rank: 5, label: 'Minillustration', tag: '@minillustration style', engine: 'anima',
     note: 'ranked fourth' },
 ];
 
-export const DEFAULT_STYLE = 'shinkai';
+export const DEFAULT_STYLE = 'finnstark';
 
 /** Never throws on an unknown key: a save file from a build with a different menu must still play. */
 export function resolveStyle(key) {

@@ -1,439 +1,771 @@
 {
  "schema": "db-art-1",
- "style": "shinkai",
- "styleTag": "@makoto_shinkai style",
- "generated": "2026-11-09T20:11:37.012Z",
- "workflow": "anima_card_api.json",
- "steps": 6,
+ "style": "finnstark",
+ "styleTag": "Anato Finnstark fantasy illustration with bold linework",
+ "engine": "qwen",
+ "generated": "2026-11-09T21:21:57.284Z",
+ "workflow": "qwen_image_21-basic_t2i-1 (rebuilt as API graph, prompt enhancer off)",
+ "steps": 8,
  "assets": [
   {
    "id": "mat_basilisk-scale",
    "kind": "material",
    "tier": 4,
-   "file": "shinkai/mat_basilisk-scale.png",
-   "w": 640,
-   "h": 640,
-   "seed": 2144485987,
-   "sha256": "f46cf7fdc34998223a76fee09837f91d354f60c4cb0bec056a4b93cb01dd8fd0",
-   "prompt": "a single heavy grey-green scale, keeled ridge, stone-grey at the edges, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_basilisk-scale.png",
+   "w": 704,
+   "h": 704,
+   "seed": 155610839,
+   "sha256": "5464e0d161d23f8892a6394e95f410e58ee2c6c1d183a0ac0b946bd3eabcdeb8",
+   "alpha": {
+    "min": 0,
+    "mean": 89,
+    "transparent": 0.651,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a single heavy grey-green scale, keeled ridge, stone-grey at the edges, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_bone",
    "kind": "material",
    "tier": 1,
-   "file": "shinkai/mat_bone.png",
-   "w": 640,
-   "h": 640,
-   "seed": 363172915,
-   "sha256": "380620627a01c3102b6acf154b432e82b0b6497f16fb2a3cc8b0753b43478c09",
-   "prompt": "a cleaned animal femur, sun-bleached and chipped, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_bone.png",
+   "w": 704,
+   "h": 704,
+   "seed": 2110237869,
+   "sha256": "85b74cc69d2e1e51f1052ac9e547a0020e1c73e1acbf7d49fcdd01a3be784f69",
+   "alpha": {
+    "min": 0,
+    "mean": 42.5,
+    "transparent": 0.835,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a cleaned animal femur, sun-bleached and chipped, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_chimera-sinew",
    "kind": "material",
    "tier": 4,
-   "file": "shinkai/mat_chimera-sinew.png",
-   "w": 640,
-   "h": 640,
-   "seed": 1022673247,
-   "sha256": "4ed72c54f52c3e61141c8731bcac6c57f7834d7b1d4302107282ce0639f804ad",
-   "prompt": "a braided cord of three differently-coloured sinews, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_chimera-sinew.png",
+   "w": 704,
+   "h": 704,
+   "seed": 76565273,
+   "sha256": "c73486dd973a5136cc91056941ec08559705fc3bc2195204a703925aed64e406",
+   "alpha": {
+    "min": 0,
+    "mean": 73.6,
+    "transparent": 0.71,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a braided cord of three differently-coloured sinews, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_clay",
    "kind": "material",
    "tier": 1,
-   "file": "shinkai/mat_clay.png",
-   "w": 640,
-   "h": 640,
-   "seed": 202829624,
-   "sha256": "dcdf4cd9fc897eeaaec74b51c809c7ed913f36911c349822079c634721bc9e57",
-   "prompt": "a damp lump of grey river clay, thumbprints in it, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_clay.png",
+   "w": 704,
+   "h": 704,
+   "seed": 294133303,
+   "sha256": "2c3cceedfc65b2c8d65786667e5aa0d5731e0ec979f1b5bb1377299a2a8eaecc",
+   "alpha": {
+    "min": 0,
+    "mean": 74.2,
+    "transparent": 0.709,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a damp lump of grey river clay, thumbprints in it, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_cloth",
    "kind": "material",
    "tier": 1,
-   "file": "shinkai/mat_cloth.png",
-   "w": 640,
-   "h": 640,
-   "seed": 1877054287,
-   "sha256": "490cbbdc1e2ed51465feb05abd13ea5b95eb3a75a8b3c8094f98cf90914e3d9d",
-   "prompt": "a folded square of undyed coarse linen, frayed edge, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_cloth.png",
+   "w": 704,
+   "h": 704,
+   "seed": 659545950,
+   "sha256": "f39206889a21fcf50a481883d4f3920270148708c07c4d7aaabefe582610e360",
+   "alpha": {
+    "min": 0,
+    "mean": 144.4,
+    "transparent": 0.428,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a folded square of undyed coarse linen, frayed edge, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_copper",
    "kind": "material",
    "tier": 2,
-   "file": "shinkai/mat_copper.png",
-   "w": 640,
-   "h": 640,
-   "seed": 204418462,
-   "sha256": "d6bd0c8b3812006130ae32b2b2c9416f63aee37ec1f44a74e0e21cb0c3a1f2e8",
-   "prompt": "a red-gold copper ingot with a green fingertip of verdigris, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_copper.png",
+   "w": 704,
+   "h": 704,
+   "seed": 248136076,
+   "sha256": "de61c8b8881081f333071bc93926d351e46eecbf1b6233a6ad2aae3acfba6ddf",
+   "alpha": {
+    "min": 0,
+    "mean": 97.2,
+    "transparent": 0.619,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a red-gold copper ingot with a green fingertip of verdigris, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_deep-amber",
    "kind": "material",
    "tier": 3,
-   "file": "shinkai/mat_deep-amber.png",
-   "w": 640,
-   "h": 640,
-   "seed": 1357389017,
-   "sha256": "62eb8e202f4f6424c649f79d625fb455c138f5a1de7accce2e6281e64abaf614",
-   "prompt": "a lump of amber with an insect sealed inside, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_deep-amber.png",
+   "w": 704,
+   "h": 704,
+   "seed": 1146667424,
+   "sha256": "4e69f989b57b3c9c9cae2b0959bcd31ac4ae5d7f46e7d4ea5b4a08312d261a60",
+   "alpha": {
+    "min": 0,
+    "mean": 94.8,
+    "transparent": 0.629,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a lump of amber with an insect sealed inside, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_dreamthread",
    "kind": "material",
    "tier": 5,
-   "file": "shinkai/mat_dreamthread.png",
-   "w": 640,
-   "h": 640,
-   "seed": 560475297,
-   "sha256": "b6fa968a7263fe02e249df3a97f269d68c555f9f7fac6e593025c1950260d747",
-   "prompt": "a thread that is slightly out of focus, trailing off the spool, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_dreamthread.png",
+   "w": 704,
+   "h": 704,
+   "seed": 955019730,
+   "sha256": "439e954a04c500b44e1d698001f148fee82412fe28c5a7ba085db52c935f730a",
+   "alpha": {
+    "min": 0,
+    "mean": 89.1,
+    "transparent": 0.653,
+    "corner": 2
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a thread that is slightly out of focus, trailing off the spool, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_firstfire-ember",
    "kind": "material",
    "tier": 5,
-   "file": "shinkai/mat_firstfire-ember.png",
-   "w": 640,
-   "h": 640,
-   "seed": 518938454,
-   "sha256": "ca84777536e0230d5fe70449b8ac28b0fc7558d12c4d4e7d1e35a845200902a9",
-   "prompt": "a coal with the first flame still clinging to it, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_firstfire-ember.png",
+   "w": 704,
+   "h": 704,
+   "seed": 2102866085,
+   "sha256": "f11e15fb6407ddb02781e493ce961076fbc51f35c11775740e9684e581f71644",
+   "alpha": {
+    "min": 0,
+    "mean": 102.6,
+    "transparent": 0.596,
+    "corner": 17
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a coal with the first flame still clinging to it, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_flint",
    "kind": "material",
    "tier": 1,
-   "file": "shinkai/mat_flint.png",
-   "w": 640,
-   "h": 640,
-   "seed": 958828142,
-   "sha256": "35f7d182e3c520aecb6e7acfd14dd152c16677cc73f3896b4540ca22332f2326",
-   "prompt": "a knapped black flint nodule, conchoidal fractures glinting, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_flint.png",
+   "w": 704,
+   "h": 704,
+   "seed": 181444090,
+   "sha256": "17fdf69f11cb29c11ebf6bc10ed3fb00c4c8b33656053224bb2662b17062e140",
+   "alpha": {
+    "min": 0,
+    "mean": 73.3,
+    "transparent": 0.713,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a knapped black flint nodule, conchoidal fractures glinting, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_gleamhide",
    "kind": "material",
    "tier": 3,
-   "file": "shinkai/mat_gleamhide.png",
-   "w": 640,
-   "h": 640,
-   "seed": 1722208315,
-   "sha256": "774dc7edb77e6c75e89a6ae7c37cb45397297a7b17ee026eefb6d4fb83d78bb4",
-   "prompt": "a hide of overlapping bog-green scales, wet and glossy, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_gleamhide.png",
+   "w": 704,
+   "h": 704,
+   "seed": 2142562180,
+   "sha256": "19dcbd57d58cf4a7d3026c705892b88bdd052c1a363fe9ca0993243074e87398",
+   "alpha": {
+    "min": 0,
+    "mean": 142.4,
+    "transparent": 0.439,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a hide of overlapping bog-green scales, wet and glossy, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_hardwood",
    "kind": "material",
    "tier": 2,
-   "file": "shinkai/mat_hardwood.png",
-   "w": 640,
-   "h": 640,
-   "seed": 1453853177,
-   "sha256": "d085b27743bd508ea7c964ccf23848fa593a37a95576d9083ad77b2a8954cee9",
-   "prompt": "a dense dark heartwood block with tight grain, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_hardwood.png",
+   "w": 704,
+   "h": 704,
+   "seed": 1901186277,
+   "sha256": "fa53e0865156aa9a01538a2699ae077325f53688b30e5198eb06629f8441f89f",
+   "alpha": {
+    "min": 0,
+    "mean": 167,
+    "transparent": 0.345,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a dense dark heartwood block with tight grain, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_iron",
    "kind": "material",
    "tier": 2,
-   "file": "shinkai/mat_iron.png",
-   "w": 640,
-   "h": 640,
-   "seed": 947076870,
-   "sha256": "8abe4e392a1bb706fe9f9d724ef5a60f57b7dc8eeea8497f4070171ada8cbde5",
-   "prompt": "a dark forged iron bar with hammer scale and rust bloom, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_iron.png",
+   "w": 704,
+   "h": 704,
+   "seed": 474493826,
+   "sha256": "c24598e2bd64077a4651fa5ee26f278ebb8326173feaa4eeea702187084add4f",
+   "alpha": {
+    "min": 0,
+    "mean": 67.4,
+    "transparent": 0.737,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a dark forged iron bar with hammer scale and rust bloom, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_ironbark-heart",
    "kind": "material",
    "tier": 4,
-   "file": "shinkai/mat_ironbark-heart.png",
-   "w": 640,
-   "h": 640,
-   "seed": 214997228,
-   "sha256": "c56052181802973c34a1bcd416dee2d9bf8a4df0750f231b1a75d97d4f7ccaef",
-   "prompt": "a cross-section of iron-dark wood with a rust-coloured heart, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_ironbark-heart.png",
+   "w": 704,
+   "h": 704,
+   "seed": 656871693,
+   "sha256": "ce4bebb928f36fb7fe6c8e2d4e3dab515388e56caeed224d4ec3b1e32f81245a",
+   "alpha": {
+    "min": 0,
+    "mean": 97.3,
+    "transparent": 0.621,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a cross-section of iron-dark wood with a rust-coloured heart, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_kings-oath-stone",
    "kind": "material",
    "tier": 5,
-   "file": "shinkai/mat_kings-oath-stone.png",
-   "w": 640,
-   "h": 640,
-   "seed": 254508759,
-   "sha256": "1a15dee0c816c35db6a3053903ef4ff65ac8309aa06b3493bb30d86a800e0256",
-   "prompt": "a worn river stone with a carved crown worn smooth, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_kings-oath-stone.png",
+   "w": 704,
+   "h": 704,
+   "seed": 100068451,
+   "sha256": "8ae59b790f81d4e418fca1ccfcbd5447ca87390034fd8eeae5fb121c2d1d769d",
+   "alpha": {
+    "min": 0,
+    "mean": 79.3,
+    "transparent": 0.69,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a worn river stone with a carved crown worn smooth, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_leather",
    "kind": "material",
    "tier": 2,
-   "file": "shinkai/mat_leather.png",
-   "w": 640,
-   "h": 640,
-   "seed": 1867058125,
-   "sha256": "3c47b8633cc9f9a8bc303980c6c56c7e1a9eda966e399982f96b8765b4413750",
-   "prompt": "a supple tan hide, edges burnished, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_leather.png",
+   "w": 704,
+   "h": 704,
+   "seed": 2095885412,
+   "sha256": "ec6f278ba3ff356fe2eef1da96ae639859072357ebe6a3ca723f3938fb54f2c4",
+   "alpha": {
+    "min": 0,
+    "mean": 65.6,
+    "transparent": 0.743,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a supple tan hide, edges burnished, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_lumen-gem",
    "kind": "material",
    "tier": 3,
-   "file": "shinkai/mat_lumen-gem.png",
-   "w": 640,
-   "h": 640,
-   "seed": 800289632,
-   "sha256": "038318afba45268ca360e1967a6019f2ca0038d70fafe678e1c32096f50df09f",
-   "prompt": "a faceted clear gem with cold light moving inside it, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_lumen-gem.png",
+   "w": 704,
+   "h": 704,
+   "seed": 1399123650,
+   "sha256": "510b5adb75149d4df3ea1c97d742e2e0e7a23746e963529fbe0b9f1d793cb4d4",
+   "alpha": {
+    "min": 0,
+    "mean": 63.8,
+    "transparent": 0.751,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a faceted clear gem with cold light moving inside it, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_mithral-ingot",
    "kind": "material",
    "tier": 3,
-   "file": "shinkai/mat_mithral-ingot.png",
-   "w": 640,
-   "h": 640,
-   "seed": 49757118,
-   "sha256": "6283da9b1a0359059eeea6367ea18e3b2c2d99b1950242a3ff8f0d8331dd4070",
-   "prompt": "a pale silver-white ingot, faintly luminous, hovering a hair above the ground, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_mithral-ingot.png",
+   "w": 704,
+   "h": 704,
+   "seed": 810876681,
+   "sha256": "2f44d8ca911e19a75d4eb40b259eb522dda5d69f20e5b362925714ba1fca92fb",
+   "alpha": {
+    "min": 0,
+    "mean": 49.2,
+    "transparent": 0.808,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a pale silver-white ingot, faintly luminous, hovering a hair above the ground, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_ochre",
    "kind": "material",
    "tier": 1,
-   "file": "shinkai/mat_ochre.png",
-   "w": 640,
-   "h": 640,
-   "seed": 1646866086,
-   "sha256": "48743d372a0a7014f78b48c844fdd22e7192e047322dc122c4b93e37d95b8fd9",
-   "prompt": "a clay pot of red ochre powder with a stained wooden spatula, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_ochre.png",
+   "w": 704,
+   "h": 704,
+   "seed": 2111011461,
+   "sha256": "ba1958c58ed2415de1115c6e8e8df107312d70b371ead86fa7ce9372f0dc8c15",
+   "alpha": {
+    "min": 0,
+    "mean": 75.4,
+    "transparent": 0.705,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a clay pot of red ochre powder with a stained wooden spatula, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_phoenix-cinder",
    "kind": "material",
    "tier": 4,
-   "file": "shinkai/mat_phoenix-cinder.png",
-   "w": 640,
-   "h": 640,
-   "seed": 1165764648,
-   "sha256": "99949522db20606e4a717cadd64168fc887bfb81be71160ed5b400dc8584557e",
-   "prompt": "an ember that has not gone out, ash flaking off it, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_phoenix-cinder.png",
+   "w": 704,
+   "h": 704,
+   "seed": 1983801732,
+   "sha256": "0a6b134e91f017e46a5ac68e77eff63b9a0149707f4d27c5a87d39ebec605cff",
+   "alpha": {
+    "min": 0,
+    "mean": 52.7,
+    "transparent": 0.794,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is an ember that has not gone out, ash flaking off it, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_reed",
    "kind": "material",
    "tier": 1,
-   "file": "shinkai/mat_reed.png",
-   "w": 640,
-   "h": 640,
-   "seed": 540806710,
-   "sha256": "e8da091938ad168172f5266bee75ad486ec14c5cd9227094c81230ad30ceb5c4",
-   "prompt": "a bundle of dried marsh reeds tied with twine, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_reed.png",
+   "w": 704,
+   "h": 704,
+   "seed": 1810191264,
+   "sha256": "e00f72b00e4436ba8f85bf2168b92490794df8b1d70af3a817dc1cde110e495d",
+   "alpha": {
+    "min": 0,
+    "mean": 76.8,
+    "transparent": 0.697,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a bundle of dried marsh reeds tied with twine, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_shell",
    "kind": "material",
    "tier": 2,
-   "file": "shinkai/mat_shell.png",
-   "w": 640,
-   "h": 640,
-   "seed": 26632222,
-   "sha256": "b8ff5f0095d79e635abf942039d80dfaaf44fe456e0d5227ccf5bda506e3461f",
-   "prompt": "an abalone shell, nacre interior catching light, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_shell.png",
+   "w": 704,
+   "h": 704,
+   "seed": 197373855,
+   "sha256": "8d0f494f929802bd53094624c3cb5d053ebe5fa0cff45f35eec73f71c550e674",
+   "alpha": {
+    "min": 0,
+    "mean": 96.4,
+    "transparent": 0.623,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is an abalone shell, nacre interior catching light, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_silver",
    "kind": "material",
    "tier": 2,
-   "file": "shinkai/mat_silver.png",
-   "w": 640,
-   "h": 640,
-   "seed": 384472776,
-   "sha256": "23f95a46a658fa8faa7a92e46de195d2b3334ae34b4d922a534216234527931b",
-   "prompt": "a bright silver ingot, stamped hallmarks, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_silver.png",
+   "w": 704,
+   "h": 704,
+   "seed": 1679490308,
+   "sha256": "e5a46cd92f5fe427377ebbc25b88a4e8b99bbfca27973fa68eafb74882cbd315",
+   "alpha": {
+    "min": 0,
+    "mean": 92.1,
+    "transparent": 0.64,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a bright silver ingot, stamped hallmarks, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_silverleaf-steel",
    "kind": "material",
    "tier": 3,
-   "file": "shinkai/mat_silverleaf-steel.png",
-   "w": 640,
-   "h": 640,
-   "seed": 1146187707,
-   "sha256": "7e885094f2c15a77f194989fadc69ff69ea0278da6e03c1063e775a067af2490",
-   "prompt": "a folded blade blank, silver veins in dark steel, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_silverleaf-steel.png",
+   "w": 704,
+   "h": 704,
+   "seed": 978759198,
+   "sha256": "5967f96ec2cac540d66f603cb3ad40272e2e727e0d12277713b3c07a6430cf3c",
+   "alpha": {
+    "min": 0,
+    "mean": 59.1,
+    "transparent": 0.76,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a folded blade blank, silver veins in dark steel, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_sinew",
    "kind": "material",
    "tier": 1,
-   "file": "shinkai/mat_sinew.png",
-   "w": 640,
-   "h": 640,
-   "seed": 1988301514,
-   "sha256": "5a56db438201a38e6f5de4402bd36cfa8403d2d1e3ddf7a00946ed1cf742aca4",
-   "prompt": "a coil of dried animal tendon, pale and waxy, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_sinew.png",
+   "w": 704,
+   "h": 704,
+   "seed": 642429599,
+   "sha256": "df47ccd7c3c7794e6ebf38ba726b03538f262b9c656b30eea90e2a0d834496d8",
+   "alpha": {
+    "min": 0,
+    "mean": 65.3,
+    "transparent": 0.743,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a coil of dried animal tendon, pale and waxy, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_starfall-core",
    "kind": "material",
    "tier": 5,
-   "file": "shinkai/mat_starfall-core.png",
-   "w": 640,
-   "h": 640,
-   "seed": 576185470,
-   "sha256": "9a315b9f6350d1e3078803cf4e2ea90660c24fb9b8928a33a156f79225a562e3",
-   "prompt": "a meteoric core, pitted and still warm at the cracks, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_starfall-core.png",
+   "w": 704,
+   "h": 704,
+   "seed": 671115357,
+   "sha256": "ba8901eb0a3ceeee4510c5ce790953a49a50896549d5848f29d5db57a2f18e50",
+   "alpha": {
+    "min": 0,
+    "mean": 84.1,
+    "transparent": 0.671,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a meteoric core, pitted and still warm at the cracks, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_steel",
    "kind": "material",
    "tier": 2,
-   "file": "shinkai/mat_steel.png",
-   "w": 640,
-   "h": 640,
-   "seed": 1862945724,
-   "sha256": "5fcb6e647df7950dae72a6a620438cff874b2617f0a6f4893ad6411e05e80d08",
-   "prompt": "a polished steel bar, bright ground edge, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_steel.png",
+   "w": 704,
+   "h": 704,
+   "seed": 1033480093,
+   "sha256": "f0e5b4f1b8186308bff8f1c7842f73174ef25c3ab10a63af73e2e723d398a17a",
+   "alpha": {
+    "min": 0,
+    "mean": 83,
+    "transparent": 0.675,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a polished steel bar, bright ground edge, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_tin",
    "kind": "material",
    "tier": 1,
-   "file": "shinkai/mat_tin.png",
-   "w": 640,
-   "h": 640,
-   "seed": 771387583,
-   "sha256": "ec3eaa1efc53df7ab6b907ba07b96ab82f3d87c902717a3538ad201054322a5f",
-   "prompt": "two dull grey ingots with a soft matte sheen, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_tin.png",
+   "w": 704,
+   "h": 704,
+   "seed": 500900297,
+   "sha256": "184d538c6bea1d082256f3615ccf0648b78bacd47bfaf26fb106f368a14f24e2",
+   "alpha": {
+    "min": 0,
+    "mean": 109.2,
+    "transparent": 0.572,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is two dull grey ingots with a soft matte sheen, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_voidglass",
    "kind": "material",
    "tier": 4,
-   "file": "shinkai/mat_voidglass.png",
-   "w": 640,
-   "h": 640,
-   "seed": 1779205826,
-   "sha256": "9c5fea0bbc0ef668c64f27764e6e25fd08e73b4073d3dde9a97e792edada4085",
-   "prompt": "a shard of black glass that drinks the light, no reflection, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_voidglass.png",
+   "w": 704,
+   "h": 704,
+   "seed": 1111122420,
+   "sha256": "7233c147bc69eea2a0c7f2973c29cef790b37b0b7935a5dc5838aafaa4fa5dca",
+   "alpha": {
+    "min": 0,
+    "mean": 85.9,
+    "transparent": 0.663,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a shard of black glass that drinks the light, no reflection, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_wood",
    "kind": "material",
    "tier": 1,
-   "file": "shinkai/mat_wood.png",
-   "w": 640,
-   "h": 640,
-   "seed": 212063807,
-   "sha256": "fc5e8018119b6e49889a70603a6f1382458d59b7e71fb4e82872eb975eb3dba6",
-   "prompt": "a rough-hewn oak plank with axe marks and pale sap, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_wood.png",
+   "w": 704,
+   "h": 704,
+   "seed": 776939987,
+   "sha256": "2a44b3a5e0e92f02118c06155402af9882d6e9f0771caf11ef61f58de747f5d3",
+   "alpha": {
+    "min": 0,
+    "mean": 77.9,
+    "transparent": 0.698,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a rough-hewn oak plank with axe marks and pale sap, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_wool",
    "kind": "material",
    "tier": 2,
-   "file": "shinkai/mat_wool.png",
-   "w": 640,
-   "h": 640,
-   "seed": 1626890325,
-   "sha256": "42681b5859176ab1bc40532f4c619f59219518f5d7f763b12b5ca4e270b58180",
-   "prompt": "a thick folded wool blanket with a cable weave, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_wool.png",
+   "w": 704,
+   "h": 704,
+   "seed": 1924118360,
+   "sha256": "e6be125d0a3564c8c7ee957a95031fa8fc93173be33302bd00affb2d15aaf8c8",
+   "alpha": {
+    "min": 0,
+    "mean": 154.3,
+    "transparent": 0.389,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a thick folded wool blanket with a cable weave, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "mat_worldroot-splinter",
    "kind": "material",
    "tier": 5,
-   "file": "shinkai/mat_worldroot-splinter.png",
-   "w": 640,
-   "h": 640,
-   "seed": 784066659,
-   "sha256": "291f44724ccfc469dbd5448102c22715e9350178a2e01e36493616d4870e9b92",
-   "prompt": "a pale splinter of living root, damp and fibrous, single object centred on plain dark ground, soft warm rim light, shallow depth of field, no hands, no people, no words, no lettering, item card, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/mat_worldroot-splinter.png",
+   "w": 704,
+   "h": 704,
+   "seed": 1110243877,
+   "sha256": "cda70da8fdc3735f1b9926ed3d125c636733efdc71a04dfd93f98dd7e07e7b5a",
+   "alpha": {
+    "min": 0,
+    "mean": 45.5,
+    "transparent": 0.82,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a pale splinter of living root, damp and fibrous, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
    "id": "ui_button_plate",
    "kind": "ui",
    "tier": null,
-   "file": "shinkai/ui_button_plate.png",
-   "w": 512,
+   "engine": "qwen",
+   "file": "finnstark/ui_button_plate.png",
+   "w": 768,
    "h": 256,
-   "seed": 259623018,
-   "sha256": "086aecd91e006289d977d14a5b87028f01f4618be3cbd6e4143bb9fdcca7a594",
-   "prompt": "small polished bronze plaque set into dark leather, flat even light, no words, no lettering, no symbols, @makoto_shinkai style"
+   "seed": 148264557,
+   "sha256": "c66377078d344e5da0054e75803858f79f09ff84e8d39b0d7a4b8a03cb8a0063",
+   "alpha": {
+    "min": 0,
+    "mean": 170.2,
+    "transparent": 0.332,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is horizontal polished bronze button plaque with beveled bold-outlined edges, empty face with no text, no words, no lettering, no symbols."
   },
   {
    "id": "ui_dice_tray",
    "kind": "ui",
    "tier": null,
-   "file": "shinkai/ui_dice_tray.png",
-   "w": 640,
-   "h": 640,
-   "seed": 2147044842,
-   "sha256": "9d2ccbd10cce55d5b0171e0875ddf24db97254303555406883d0dfc4fd7d6b1b",
-   "prompt": "empty worn wooden dice tray lined with faded green felt, a little sawdust and grit in the corner, top-down three-quarter view, no dice, no words, no lettering, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/ui_dice_tray.png",
+   "w": 1024,
+   "h": 1024,
+   "seed": 494719577,
+   "sha256": "acefed1d8d311ad288ca0ff8c5acd5fd9825011a38fc8df82a7af501d402d969",
+   "alpha": {
+    "min": 0,
+    "mean": 100.9,
+    "transparent": 0.605,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is empty worn wooden dice tray lined with faded green felt, a little sawdust and grit in the corner, top-down three-quarter view, bold black outline, no dice, no words, no lettering."
   },
   {
    "id": "ui_divider_ornament",
    "kind": "ui",
    "tier": null,
-   "file": "shinkai/ui_divider_ornament.png",
+   "engine": "qwen",
+   "file": "finnstark/ui_divider_ornament.png",
    "w": 1024,
-   "h": 160,
-   "seed": 1992516013,
-   "sha256": "3d262b9302cb940b74fdd72a74859ec2cec9d56e7adda86065e08ab046cd917f",
-   "prompt": "thin horizontal band of carved grey stone with brass rivets and a subtle wave motif, flat even light, no words, no lettering, @makoto_shinkai style"
+   "h": 192,
+   "seed": 245615145,
+   "sha256": "f9b09f2d1cf0b6d86317a50e52fd42adca4708175c9daaefb871277f287929f8",
+   "alpha": {
+    "min": 0,
+    "mean": 89.2,
+    "transparent": 0.653,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is thin horizontal band of carved grey stone with brass rivets and a subtle wave motif, bold black outline, flat even light, no words, no lettering."
   },
   {
    "id": "ui_menu_backdrop",
    "kind": "backdrop",
    "tier": null,
-   "file": "shinkai/ui_menu_backdrop.png",
-   "w": 1152,
-   "h": 648,
-   "seed": 409377890,
-   "sha256": "ce435143b2ba65a33f6581b780106de16e5594b59d8c98b15d2ac648be5191d0",
-   "prompt": "vast empty dungeon hall at first light, one high window throwing a shaft, dust motes, long shadows, painted background, no people, no words, no lettering, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/ui_menu_backdrop.png",
+   "w": 1344,
+   "h": 768,
+   "seed": 1776473614,
+   "sha256": "a7513fbe8dd3e5c5f11266bb27d2b884efa12b6e9b6abfed4e0560609b32f9a1",
+   "alpha": {
+    "min": 231,
+    "mean": 255,
+    "transparent": 0,
+    "corner": 255
+   },
+   "cut_out": null,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. Full-bleed opaque painted background. The subject is vast empty dungeon hall at first light, one high window throwing a shaft, dust motes, long shadows, full-bleed painted background, edge to edge, no vignette, no people, no words, no lettering."
   },
   {
    "id": "ui_panel_plate",
    "kind": "ui",
    "tier": null,
-   "file": "shinkai/ui_panel_plate.png",
-   "w": 640,
-   "h": 640,
-   "seed": 1268953131,
-   "sha256": "debf8427bf5ae30cd8058481289a77d277d5eb2b664959aecac6e24b6be0283d",
-   "prompt": "worn leather surface with a panel of pale vellum inset, faint stitching around the border, flat even light, seamless texture, no words, no lettering, no symbols, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/ui_panel_plate.png",
+   "w": 1024,
+   "h": 1024,
+   "seed": 438434631,
+   "sha256": "8e136ead7bd7a276321814f1d1e2f8368edf4908e80abd8c8ab0c648e4640611",
+   "alpha": {
+    "min": 0,
+    "mean": 187.8,
+    "transparent": 0.264,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is ornate fantasy panel: worn leather frame with brass corners around an empty pale vellum centre, bold black outline, flat even light, empty centre with no text, no words, no lettering, no symbols."
   },
   {
    "id": "ui_settings_backdrop",
    "kind": "backdrop",
    "tier": null,
-   "file": "shinkai/ui_settings_backdrop.png",
-   "w": 1152,
-   "h": 648,
-   "seed": 683002983,
-   "sha256": "c96b4576c75043adb649a63d71ff70b636760bb58006bb24856f7c0af9290ace",
-   "prompt": "workbench covered in rolled maps, compass and chalk rubbings, warm lamp glow, cool window behind, painted background, no people, no words, no lettering, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/ui_settings_backdrop.png",
+   "w": 1344,
+   "h": 768,
+   "seed": 832580501,
+   "sha256": "7eb7b2f72325048c164b2166bd3e26a2409d6341ffa37bb71ed2ace35070914e",
+   "alpha": {
+    "min": 240,
+    "mean": 254.9,
+    "transparent": 0,
+    "corner": 255
+   },
+   "cut_out": null,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. Full-bleed opaque painted background. The subject is workbench covered in rolled maps, compass and chalk rubbings, warm lamp glow, cool window behind, full-bleed painted background, edge to edge, no people, no words, no lettering."
   },
   {
    "id": "ui_slot_placeholder",
    "kind": "ui",
    "tier": null,
-   "file": "shinkai/ui_slot_placeholder.png",
-   "w": 512,
-   "h": 768,
-   "seed": 1993887061,
-   "sha256": "659450e187081a7707d021d92a021717829bd5e9404c92f14d6d9c510c4d4571",
-   "prompt": "empty alcove with a folded travel cloak, bare helm and empty belt hung on wooden hooks, waiting for nobody, no people, no words, no lettering, @makoto_shinkai style"
+   "engine": "qwen",
+   "file": "finnstark/ui_slot_placeholder.png",
+   "w": 640,
+   "h": 896,
+   "seed": 1772325902,
+   "sha256": "d3e0a2545514b25b206d3e476efadfb9cdaa20099e7c9c82b1f5efef6cb3cbd0",
+   "alpha": {
+    "min": 0,
+    "mean": 125.3,
+    "transparent": 0.505,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is empty alcove with a folded travel cloak, bare helm and empty belt hung on wooden hooks, waiting for nobody, bold black outline, no people, no words, no lettering."
+  },
+  {
+   "id": "ui_title_logo",
+   "kind": "ui",
+   "tier": null,
+   "engine": "qwen",
+   "file": "finnstark/ui_title_logo.png",
+   "w": 1024,
+   "h": 512,
+   "seed": 1577739990,
+   "sha256": "442b7faa8371a8493be2e8dc574a092d1e8e81fce0fd1e868a8f5236d3740906",
+   "alpha": {
+    "min": 0,
+    "mean": 155.9,
+    "transparent": 0.371,
+    "corner": 19
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is game title logo reading DUNGEON BLASTER in carved angular fantasy lettering, brass rivets, a d20 replacing the A, bold black outline, one flat cast shadow, exactly that text and no other text, no subtitle."
   }
  ],
  "missing": []

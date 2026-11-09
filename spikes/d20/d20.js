@@ -615,6 +615,12 @@ export class DiceTable {
     // The remaining jitter is a settle, not a spin: it stays inside the legibility angle the self-test asserts.
     let apexYaw = 0;
     const apex = announced.up.clone().applyQuaternion(fix);
+    // UNRESOLVED, and stated as unresolved rather than tuned until green. This aims the glyph apex away from
+    // the viewer, which is how flat text on a table reads; the self-test measures worst tilt 170.6deg across
+    // 26 rolls. Negating this vector was the obvious one-variable guess and made it strictly worse (legible
+    // 7/26 -> 2/26, worst 179.7deg), which says the error is not a global sign but a per-face offset that
+    // tracks the atlas cell's v convention - so the fix belongs in how the atlas cell is drawn, not in this
+    // yaw. The law is asserted, currently failing, and the number is printed in the page title.
     const away = new THREE.Vector3(
       this.body.p.x - this.camera.position.x, 0, this.body.p.z - this.camera.position.z
     ).normalize();

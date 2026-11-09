@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dungeon Blaster</title>
+<style>
+  /* Torchlit and readable from a couch: one accent, big type, no chrome that needs a mouse hover to find. */
+  :root {
+    --bg:#0d0b09; --panel:#171310; --line:#2c231d; --ink:#e8ddcd; --dim:#9c8c78;
+    --amber:#e8a33d; --blood:#c4553f; --moss:#7f9a5e; --violet:#8f7bb0;
+  }
+  * { box-sizing:border-box }
+  body { margin:0; background:radial-gradient(1200px 700px at 50% -10%, #1b1512, var(--bg)); color:var(--ink);
+         font:16px/1.5 "Iowan Old Style", Georgia, serif; min-height:100vh }
+  header { display:flex; align-items:center; gap:14px; padding:12px 20px; border-bottom:1px solid var(--line);
+           background:#00000055; backdrop-filter:blur(6px); position:sticky; top:0; z-index:5 }
+  h1 { font-size:17px; margin:0; letter-spacing:.14em; text-transform:uppercase; color:var(--amber) }
+  .pill { font:12px/1 ui-monospace, monospace; padding:5px 9px; border:1px solid var(--line); border-radius:99px; color:var(--dim) }
+  .pill.live { color:var(--moss); border-color:#3d5030 }
+  .pill.fake { color:var(--violet); border-color:#4a3f5c }
+  .dot { width:9px;height:9px;border-radius:99px;background:var(--blood);display:inline-block;margin-right:6px }
+  .dot.on { background:var(--moss) }
+  main { display:grid; grid-template-columns:1fr 340px; gap:18px; padding:18px 20px 40px; max-width:1500px; margin:0 auto }
+  @media (max-width:1080px){ main{grid-template-columns:1fr} }
+  button { font:inherit; background:#241d17; color:var(--ink); border:1px solid var(--line); border-radius:8px;
+           padding:8px 13px; cursor:pointer }
+  button:hover { border-color:var(--amber); color:var(--amber) }
+  button.big { background:var(--amber); color:#1a1208; font-weight:700; border-color:#f0b45c; font-size:17px; padding:11px 22px }
+  button.big:disabled { opacity:.4; cursor:wait }
+  button.rec { background:var(--blood); color:#fff; border-color:#e07b64 }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px }
+  h2 { font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--dim); margin:0 0 10px }
+  /* the narration panel is the game - everything else is furniture around it */
+  #say { min-height:126px; font-size:27px; line-height:1.42; letter-spacing:.005px }
+  #say.bark { color:var(--amber); font-size:22px; font-style:italic }
+  #say.typing::after { content:"▌"; color:var(--amber); animation:bl 1s steps(2) infinite }
+  @keyframes bl { 50%{opacity:0} }
+  #blocked { margin-top:10px; font:12.5px/1.5 ui-monospace,monospace; color:var(--blood); white-space:pre-wrap }
+  .slots { display:grid; grid-template-columns:1fr 1fr; gap:12px }
+  @media (max-width:640px){ .slots{grid-template-columns:1fr} }
+  .slot { border:1px solid var(--line); border-radius:10px; padding:12px; background:#1d1712 }
+  .slot.spoke { border-color:#4a3d24 }
+  .slot h3 { margin:0 0 2px; font-size:16px }
+  .slot .sub { font:11.5px/1.4 ui-monospace,monospace; color:var(--dim) }
+  .chips { display:flex; flex-wrap:wrap; gap:4px; margin:7px 0 }
+  .chip { font:11px/1 ui-monospace,monospace; padding:4px 7px; border-radius:5px; background:#251e18; color:var(--dim) }
+  .chip.have { color:var(--moss) }
+  .row { display:flex; gap:6px; margin-top:8px }
+  .row input { flex:1; min-width:0; background:#0f0c0a; border:1px solid var(--line); color:var(--ink);
+               border-radius:7px; padding:8px 10px; font:inherit }
+  .intent { margin-top:7px; font-size:14px; color:var(--amber) }
+  .cards { display:flex; flex-wrap:wrap; gap:10px }
+  .card { width:150px; border:1px solid var(--line); border-radius:9px; overflow:hidden; background:#0f0c0a }
+  .card img { display:block; width:100%; height:150px; object-fit:cover }
+  .card .cap { font:10.5px/1.35 ui-monospace,monospace; padding:6px 7px; color:var(--dim) }
+  .card .none { height:150px; display:flex; align-items:center; padding:10px; color:#6b5c4c; font:11px/1.4 ui-monospace,monospace }
+  #log { font:11.5px/1.55 ui-monospace,monospace; color:#7f7263; max-height:190px; overflow:auto; white-space:pre-wrap }
+  #log .warn { color:var(--amber) } #log .err { color:var(--blood) }
+  #roll { position:fixed; inset:0; background:#000d; display:none; z-index:40; align-items:center; justify-content:center; flex-direction:column; gap:10px }
+  #roll.on { display:flex }
+  #roll iframe { width:min(92vw,900px); height:min(70vh,620px); border:1px solid var(--line); border-radius:12px; background:#000 }
+  .place { color:var(--dim); font-style:italic }
+  .foot { font:11.5px/1.5 ui-monospace,monospace; color:#6b5c4c; margin-top:9px }
+</style>
+</head>
+<body>
+<header>
+  <h1>Dungeon Blaster</h1>
+  <span class="pill"><span class="dot" id="net"></span><span id="place" class="place">…</span></span>
+  <span class="pill" id="mode">…</span>
+  <span class="pill" id="round">round —</span>
+  <span style="flex:1"></span>
+  <button id="rollbtn" title="The tracker owns the number; the die just performs it">Roll d20</button>
+  <button id="newbtn" title="Fresh table, four seats">New table</button>
+  <button class="big" id="go">Play round</button>
+</header>
+
+<main>
+  <div>
+    <section>
+      <h2>The telling</h2>
+      <div id="say">Four of you wake up in a damp cell with a door and a rumour of stairs. Say what you do, then press <b>Play round</b>.</div>
+      <div id="blocked"></div>
+      <div class="foot" id="stats"></div>
+    </section>
+
+    <section style="margin-top:16px">
+      <h2>Four voices, one couch</h2>
+      <div class="slots" id="slots"></div>
+      <div class="foot">The mic button records until you press it again, then hands the audio to the speech-to-text server. Nothing is sent to the game master until you accept the words in the box - the tracker treats a mishearing you did not look at as a real intent.</div>
+    </section>
+  </div>
+
+  <div>
+    <section>
+      <h2>Cards</h2>
+      <div class="cards" id="cards"><div class="foot">No art yet. Cards appear when the tracker creates or finds something.</div></div>
+    </section>
+    <section style="margin-top:16px">
+      <h2>What the tracker did</h2>
+      <div id="log"></div>
+    </section>
+  </div>
+</main>
+
+<div id="roll"><iframe id="rollframe" allow="autoplay"></iframe><div class="foot">ESC to close · the number came from the server, not from the animation</div></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const say = $('say'), logEl = $('log'), cardsEl = $('cards');
+let busy = false;
+
+function log(msg, cls) {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.prepend(line);
+  while (logEl.children.length > 200) logEl.lastChild.remove();
+}
+
+// ----------------------------------------------------------- narration typing
+// Narration arrives as one string, all at once, after the gate released it. It is typed out on the
+// wall clock because the narrator speaks at 3-4 words a second and a wall of text that appears in one
+// frame is a page, not a story. It never reorders anything: the sentence you see is the sentence that
+// was committed, and a bark means the gate refused to state a fact it had not verified.
+let typer = null;
+function tell(text, isBark) {
+  clearInterval(typer);
+  say.className = isBark ? 'typing bark' : 'typing';
+  say.textContent = '';
+  const words = String(text || '').split(/(\s+)/);
+  let i = 0;
+  typer = setInterval(() => {
+    if (i >= words.length) { clearInterval(typer); say.classList.remove('typing'); return; }
+    say.textContent += words[i++];
+  }, 115);
+}
+
+// ------------------------------------------------------------------- SSE
+const events = new EventSource('/api/events');
+events.onopen = () => { $('net').classList.add('on'); };
+events.onerror = () => { $('net').classList.remove('on'); };
+events.addEventListener('hello', (e) => { const d = JSON.parse(e.data); mode(d.mode); log('connected'); });
+events.addEventListener('state', (e) => draw(JSON.parse(e.data)));
+events.addEventListener('log', (e) => { const d = JSON.parse(e.data); log(d.msg, d.level === 'warn' ? 'warn' : ''); });
+events.addEventListener('error', (e) => {
+  // EventSource fires "error" for ordinary connection hiccups too, so only a real payload from the game
+  // server counts as a failed round. Unlocking the button on a dropped socket would invite a double turn.
+  try { const d = JSON.parse(e.data); log(`${d.msg}${d.hint ? ' - ' + d.hint : ''}`, 'err'); setBusy(false); } catch {}
+});
+
+events.addEventListener('round', (e) => {
+  const r = JSON.parse(e.data);
+  setBusy(false);
+  tell(r.spoken || '(nothing to say)', !!r.bark);
+  $('blocked').textContent = (r.blocked ? `the gate withheld the model's sentence: ${r.blocked}\n` : '')
+    + (r.rejected || []).map((x) => `REJECTED ${x.id} ${x.code}: ${x.reason}${x.allowed ? `\n   allowed: ${x.allowed.join(', ')}` : ''}`).join('\n');
+  const tps = r.tokens_out ? ` · ${r.tokens_out} tok in ${(r.ms / 1000).toFixed(1)}s` : '';
+  $('stats').textContent = `round ${r.round} · ${r.mode} · ${r.attempts} attempt(s) · ${r.committed.length} committed, ${r.rejected.length} rejected${tps}`
+    + (r.bark ? '\nyou heard a bark: atmosphere only, because nothing was verified' : '');
+  log(`round ${r.round}: ${r.mode}, ${r.committed.join(', ') || 'no mutations'}${r.rejected.length ? `, rejected ${r.rejected.map((x) => x.code).join(',')}` : ''}`);
+});
+
+events.addEventListener('art', (e) => {
+  const a = JSON.parse(e.data);
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.innerHTML = a.url
+    ? `<img src="${a.url}" alt=""><div class="cap"></div>`
+    : `<div class="none"></div><div class="cap"></div>`;
+  el.querySelectorAll('.cap').forEach((c) => { c.textContent = `${a.job.kind} · ${a.job.subject_id}${a.why ? ` · ${a.why}` : ''}`; });
+  cardsEl.prepend(el);
+  while (cardsEl.children.length > 24) cardsEl.lastChild.remove();
+});
+
+events.addEventListener('roll', (e) => showRoll(JSON.parse(e.data).value));
+
+function mode(m) {
+  const el = $('mode');
+  el.textContent = m === 'fake-dm' ? 'scripted DM (no model)' : 'live DM';
+  el.className = `pill ${m === 'fake-dm' ? 'fake' : 'live'}`;
+}
+
+// ------------------------------------------------------------------ render
+function draw(s) {
+  $('place').textContent = s.place ? s.place.name : '…';
+  $('round').textContent = `round ${s.round}`;
+  mode(s.mode);
+  const box = $('slots');
+  box.innerHTML = '';
+  for (const p of s.slots) {
+    const el = document.createElement('div');
+    el.className = `slot${p.intent ? ' spoke' : ''}`;
+    el.innerHTML = `<h3></h3><div class="sub"></div><div class="chips"></div>
+      <div class="row"><input placeholder="what do you do?" maxlength="200"><button class="mic" title="hold the couch's attention: record, then stop">🎙</button></div>
+      <div class="intent"></div>`;
+    el.querySelector('h3').textContent = `${p.slot} · ${p.name}`;
+    el.querySelector('.sub').textContent = `level ${p.level} ${p.class} · carrying ${p.carrying.length ? p.carrying.join(', ') : 'nothing'}`;
+    const chips = el.querySelector('.chips');
+    for (const [m, q] of Object.entries(p.materials)) {
+      const c = document.createElement('span'); c.className = 'chip have'; c.textContent = `${m} ×${q}`; chips.append(c);
+    }
+    if (!Object.keys(p.materials).length) chips.innerHTML = '<span class="chip">no materials</span>';
+    el.querySelector('.intent').textContent = p.intent ? `“${p.intent}”` : '';
+    const input = el.querySelector('input');
+    input.value = p.intent || '';
+    const commit = () => { const v = input.value.trim(); if (v) intent(p.slot, v); };
+    input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') commit(); });
+    el.querySelector('.mic').addEventListener('click', (ev) => record(p.slot, ev.currentTarget));
+    box.append(el);
+  }
+}
+
+async function intent(slot, text) {
+  const r = await fetch('/api/intent', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ slot, text }) });
+  if (!r.ok) log(`slot ${slot}: ${(await r.json()).error}`, 'err');
+}
+
+function setBusy(b) { busy = b; $('go').disabled = b; $('go').textContent = b ? 'The DM is thinking…' : 'Play round'; }
+
+$('go').addEventListener('click', async () => {
+  setBusy(true);
+  const r = await fetch('/api/round', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  if (r.status !== 202) { log(`round refused: ${r.status}`, 'err'); setBusy(false); }
+});$('newbtn').addEventListener('click', () => fetch('/api/new', { method: 'POST' }).then(() => log('new table dealt')));
+$('rollbtn').addEventListener('click', async () => {
+  const r = await fetch('/api/roll', { method: 'POST' });
+  const { value } = await r.json();
+  showRoll(value);
+});
+$('roll').addEventListener('click', closeRoll);
+addEventListener('keydown', (e) => { if (e.key === 'Escape') closeRoll(); });
+
+// The die is theatre. The value comes from the server (crypto in the deterministic layer) and the
+// animation is told what happened - it cannot overrule it. See spikes/d20/README.md.
+function showRoll(value) {
+  $('rollframe').src = `/d20/index.html?auto=1&value=${value}&seed=${(Math.random() * 1e9) | 0}`;
+  $('roll').classList.add('on');
+}
+function closeRoll() { $('roll').classList.remove('on'); $('rollframe').src = 'about:blank'; }
+
+// ------------------------------------------------------------------- mics
+// Record -> decode in the browser -> 16 kHz mono 16-bit PCM WAV. The speech server wants 16 kHz mono
+// and the box has no ffmpeg, so the conversion happens where the audio already is.
+let rec = null;
+async function record(slot, btn) {
+  if (rec) {
+    if (rec.slot !== slot) { log('another slot is holding the mic - one couch, one microphone', 'warn'); return; }
+    const active = rec;
+    rec = null;
+    btn.classList.remove('rec'); btn.textContent = '🎙';
+    return hear(slot, await active.stop());
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    const mr = new MediaRecorder(stream);
+    const bits = [];
+    mr.ondataavailable = (e) => bits.push(e.data);
+    mr.start();
+    btn.classList.add('rec'); btn.textContent = '■';
+    rec = {
+      slot,
+      stop: () => new Promise((res) => {
+        mr.onstop = () => { stream.getTracks().forEach((t) => t.stop()); res(new Blob(bits, { type: mr.mimeType || 'audio/webm' })); };
+        mr.stop();
+      }),
+    };
+  } catch (e) {
+    log(`mic refused: ${e.message} (the browser needs permission; a couch still needs a real mic)`, 'err');
+  }
+}
+
+async function hear(slot, blob) {
+  if (!blob || !blob.size) return log('recorded nothing', 'warn');
+  try {
+    const pcm = await toWav(blob);
+    const r = await fetch(`/api/say?slot=${slot}`, { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: pcm });
+    const j = await r.json();
+    if (!r.ok) return log(`speech server: ${j.error}${j.hint ? ' - ' + j.hint : ''}`, 'err');
+    const text = String(j.text || '').trim();
+    if (!text) return log('heard nothing worth writing down', 'warn');
+    // It lands in the box, not in the round. A mishearing becomes a player intent only once a human sees it.
+    const box = document.querySelectorAll('#slots .slot')[slot - 1]?.querySelector('input');
+    if (box) { box.value = text; box.focus(); }
+    log(`slot ${slot} heard: ${text}`);
+  } catch (e) { log(`recording failed: ${e.message}`, 'err'); }
+}
+
+async function toWav(blob) {
+  const buf = await new AudioContext().decodeAudioData(await blob.arrayBuffer());
+  const rate = 16000, ch = 1;
+  const off = new OfflineAudioContext(ch, Math.ceil(buf.duration * rate), rate);
+  off.createBufferSource().buffer = buf;
+  off.start(0);
+  const out = await off.startRendering();
+  const data = out.getChannelData(0);
+  const bytes = new DataView(new ArrayBuffer(44 + data.length * 2));
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) bytes.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); bytes.setUint32(4, 36 + data.length * 2, true); str(8, 'WAVEfmt ');
+  bytes.setUint32(16, 16, true); bytes.setUint16(20, 1, true); bytes.setUint16(22, ch, true);
+  bytes.setUint32(24, rate, true); bytes.setUint32(28, rate * 2, true); bytes.setUint16(32, 2, true); bytes.setUint16(34, 16, true);
+  str(36, 'data'); bytes.setUint32(40, data.length * 2, true);
+  for (let i = 0; i < data.length; i++) bytes.setInt16(44 + i * 2, Math.max(-1, Math.min(1, data[i])) * 32767, true);
+  return bytes.buffer;
+}
+
+fetch('/api/state').then((r) => r.json()).then(draw).catch(() => log('game server unreachable', 'err'));
+
+// Attract mode: open the page with ?demo and the table plays itself, so "does this build run?" is
+// answerable by a stranger without a keyboard, a microphone, or a model loaded. The scripted game master
+// still goes through the real gate, so what a viewer sees is a real round, not a video of one.
+async function demo() {
+  if (!new URLSearchParams(location.search).has('demo')) return;
+  log('demo: four canned voices, no keyboard, no model');
+  for (const [slot, text] of [
+    [1, 'lash a wood shaft to a knot of sinew'],
+    [2, 'feel along the wall for a loose stone'],
+    [3, 'ask the dark whether it wants to trade'],
+    [4, 'stack the wet straw into something soft'],
+  ]) {
+    await intent(slot, text);
+    await new Promise((r) => setTimeout(r, 120));
+  }
+  $('go').click();
+}
+setTimeout(demo, 400);
+</script>
+</body>
+</html>

@@ -64,6 +64,13 @@ async function armAudio(){ if (first){ first = false; try { actx = new (window.A
 function legibility(t) {
   const f = t.die.faces.find((x) => x.value === t.target);
   if (!f) return { ang: 999, mir: null, upright: false };
+  // project() multiplies by matrixWorldInverse, and three only refreshes that inside renderer.render(). The
+  // self-test runs in quiet mode, which never renders - so every projection here was running through a
+  // matrix that had never been set, and the tool I had just written to catch the die lying to a player was
+  // itself reading a garbage screen position and reporting "tilt 90deg" for 20 of 26 rolls. Update the same
+  // two matrices render() would have, or the number measures nothing.
+  t.camera.updateMatrixWorld(true);
+  t.camera.matrixWorldInverse.copy(t.camera.matrixWorld).invert();
   const q = t.body.p ? t.body.q : t.body.q;
   const n = f.normal.clone().applyQuaternion(q);
   const glyphUp = f.up.clone().applyQuaternion(q).normalize();
@@ -74,7 +81,10 @@ function legibility(t) {
   const tip = px(centre.clone().add(glyphUp.multiplyScalar(0.35)));
   const rt = px(centre.clone().add(glyphRight.multiplyScalar(0.35)));
   const dy = tip.y - c.y, dx = tip.x - c.x;                       // NDC: +y up, +x right
-  const ang = Math.atan2(Math.abs(dx), Math.max(1e-6, dy)) * 180 / Math.PI;
+  // Report the true angle over 0..180. The first version clamped dy at a epsilon, which collapsed every
+  // downward-pointing glyph to exactly 90.0deg and made an upside-down die and a sideways die the same
+  // number - the constant 90.0 across 20 rolls was the tell that the constant was fake.
+  const ang = (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) ? 180 : Math.atan2(Math.abs(dx), dy) * 180 / Math.PI;
   return {
     ang,
     mir: (rt.x - c.x) < 0,               // a correct glyph's right side lands to the right

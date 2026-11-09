@@ -14,10 +14,15 @@
 
 // @ts-ignore - loaded through jiti; the tracker is plain ESM JavaScript at ../../tracker
 import {
-  newGame, joinSlot, addMaterials, setIntents, resolveRound, rulesForCall, saveGame, loadGame, validateName, mutationHash,
+  newGame, joinSlot, addMaterials, setIntents, resolveRound, rulesForCall, saveGame, loadGame, validateName,
 } from '../../../tracker/engine.js';
 // @ts-ignore
 import { loadRules } from '../../../tracker/rules_doc.js';
+// The turn itself lives in game/gm.mjs. It moved there the day the browser client needed the same turn
+// this extension runs; a second copy of a turn state machine is how two hosts end up disagreeing about
+// what a round costs, which is the one thing Slice 1 exists to prevent.
+// @ts-ignore
+import { runTurn as runTurnShared } from '../../../game/gm.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -32,17 +37,10 @@ const DM_MAX_TOKENS = Number(process.env.DB_DM_MAX_TOKENS || 900);
 
 const SLOT_NAMES = ['Bram', 'Ash', 'Sable', 'Piper'];
 
-/** Slice 1 persona. Deliberately four lines: the harness is the contract, the persona is not. */
-const PERSONA = `You are the Game Master of Dungeon Blaster, a tabletop adventure for four players on one couch.
-You are a storyteller at a table. The players hear a voice and see pictures; they never see numbers, files, or menus, and you never read a stat line aloud.
-You cannot change the world. Only the tracker can, and only when you ask it in exactly one resolve_round call per round.
-Anything you assert about the world becomes law the moment the tracker hears it, so say only what you can pay for.`;
-
-/** @type {any} */
 let game = null;
 let rules = null;
 let schema = null;
-let skipped = new Set(); // slots auto-skipped each round (NOT the bridge AFK mode)
+let afk = new Set();
 
 function ensureRules() {
   rules ||= loadRules(RULES_PATH);
@@ -50,151 +48,6 @@ function ensureRules() {
   return rules;
 }
 
-// ---------------------------------------------------------------- DM endpoint
-
-async function dmModelUrl() {
-  if (DM_MODEL) return DM_MODEL;
-  try {
-    const r = await fetch(`${DM_URL}/v1/models`, { signal: AbortSignal.timeout(4000) });
-    const j = await r.json();
-    return j?.data?.[0]?.id || 'local';
-  } catch {
-    return 'local';
-  }
-}
-
-/**
- * One DM completion. response_format json_schema because the bare json_object mode measured 0/4 on this
- * model (it echoes party state instead of following the schema), and native tool calling costs 730 extra
- * prompt tokens of cold prefill per turn.
- */
-async function dmComplete(messages, signal) {
-  const res = await fetch(`${DM_URL}/v1/chat/completions`, {
-    method: 'POST',
-    signal: signal || AbortSignal.timeout(180_000),
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: await dmModelUrl(),
-      messages,
-      temperature: DM_TEMPERATURE,
-      max_tokens: DM_MAX_TOKENS,
-      // Reasoning must stay off: the budget is first audio, and reasoning burns it before a word is spoken.
-      chat_template_kwargs: { force_reasoning: false },
-      response_format: { type: 'json_schema', json_schema: { name: 'resolve_round', strict: true, schema } },
-    }),
-  });
-  if (!res.ok) throw new Error(`DM endpoint ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const body = await res.json();
-  const text = body?.choices?.[0]?.message?.content;
-  if (!text) throw new Error('DM returned no content');
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    return null; // unparseable is a contract violation, not a crash
-  }
-}
-
-function stateSnapshot(g) {
-  const lines = [`Round ${g.round}. The party is at ${g.locations[g.party_location].name}.`];
-  for (const ch of Object.values(g.characters)) {
-    const inv = Object.keys(ch.inventory).map((id) => g.items[id].name);
-    const mats = Object.entries(ch.materials).filter(([, q]) => q > 0).map(([n, q]) => `${n} x${q}`);
-    lines.push(`Slot ${ch.slot}: ${ch.name}, level ${ch.level} ${ch.class_label}. Carrying: ${inv.join(', ') || 'nothing'}. Materials: ${mats.join(', ') || 'none'}.`);
-  }
-  const here = g.locations[g.party_location];
-  lines.push(`Loot here: ${here.loot.map((l) => `${l.name} x${l.qty}`).join(', ') || 'nothing'}. Exits: ${here.connections.map((c) => g.locations[c].name).join(', ')}.`);
-  return lines.join('\n');
-}
-
-function contractNote(extra) {
-  return [
-    'Call resolve_round exactly once. Emit narration first, then the mutations that pay for it.',
-    'Every mutation must carry a unique id, the tool name, the actor slot that requested it (1-4, or null for world changes), and the intent id it implements. An actor can only be moved by an intent that slot actually issued this round.',
-    'Materials must use the exact names in the rules, in quantities the actor actually holds. You may not propose stats, tiers, prices, or contention winners; the tracker computes them from what you pay.',
-    'Keep narration to two or three spoken sentences. Do not describe anything your mutations do not create.',
-    extra,
-  ].filter(Boolean).join('\n');
-}
-
-/**
- * The turn: propose, gate, and at most one retry. A failed strict attempt commits nothing and speaks
- * nothing, which is why the retry exists and why the fallback is allowed to stumble out loud.
- */
-async function runTurn(g, ctx, { fallback = true } = {}) {
-  const intents = g.intents;
-  const needed = rulesForCall(g, [{ tool: 'craft_item' }, { tool: 'take_item' }, { tool: 'transfer_item' }, { tool: 'move_to' }, { tool: 'award_xp' }, { tool: 'introduce_npc' }]);
-
-  // PROMPT LAYOUT IS A MEASURED CONSTRAINT, NOT A TIDY-UP (notes/probe_d2_stateedit.py, 16K context on the
-  // shipping artifact): cold eval 150s, a reused turn 0.8s, and one changed digit ANYWHERE inside the cached
-  // prefix costs the full 151s - worse than cold, and --cache-reuse does not rescue a deep edit. So:
-  //   1. system holds the persona only and never varies;
-  //   2. the rules block is the second message, identical for every round of a campaign;
-  //   3. everything mutable - round number, party snapshot, this round's intents - is the NEWEST message.
-  // This function used to put the party snapshot in the system message, which silently re-evaluated the
-  // whole prompt every round: paying 151s to say "the party has 4 torches now".
-  const stable = [
-    { role: 'system', content: PERSONA },
-    { role: 'user', content: `<rules>
-${needed.prompt}
-</rules>` },
-  ];
-  const mutableTail = () => ({
-    role: 'user',
-    content: `== STATE (authoritative) ==
-${stateSnapshot(g)}
-
-Intentions this round:
-${
-      intents.map((i) => `[${i.id}] slot ${i.slot}: ${i.text}`).join('
-') || '(nobody said anything)'}
-
-${contractNote()}`,
-  });
-
-  let attempt = 1;
-  let messages = [...stable, mutableTail()];
-  let call = null;
-  let result = null;
-  let firstHash = null;
-
-  while (attempt <= 2) {
-    ctx.ui?.notify?.(`DM turn, attempt ${attempt}...`, 'info');
-    const proposal = await dmComplete(messages, ctx.signal);
-    if (!proposal) {
-      messages = [...messages, { role: 'user', content: 'That was not valid JSON matching the contract. Try again.' }];
-      attempt += 1;
-      continue;
-    }
-    call = proposal;
-    // Identical-hash early-out (tools.md §3): one retry per round, and if the retry proposes the
-    // same mutations as the first attempt it learned nothing - stop and take the deterministic
-    // fallback instead of spending a gate and a decode on a repeat. `result` stays the first
-    // attempt's rejection, so the fallback below runs on this call.
-    const hash = mutationHash(call.mutations);
-    if (firstHash !== null && hash === firstHash) {
-      ctx.ui?.notify?.('retry repeats the first attempt verbatim - taking the fallback', 'warn');
-      break;
-    }
-    if (firstHash === null) firstHash = hash;
-    result = resolveRound(g, call, { mode: 'strict', rules_refs: needed.refs });
-    if (result.ok) break;
-    // Reject loudly, then give the model its errors back with the allowed values attached.
-    const feedback = result.rejected.map((r) => `${r.id} ${r.code}: ${r.reason}${r.allowed ? ` allowed: ${r.allowed.join(', ')}` : ''}`).join('\n');
-    ctx.ui?.notify?.(`attempt ${attempt} rejected: ${result.rejected.map((r) => `${r.code}(${r.id})`).join(', ')}`, 'warn');
-    // Appended AFTER the mutable tail. Rewriting anything already in the prefix is a 151s re-eval wearing
-    // the mask of an error message, so the correction is a new turn like any other.
-    messages = [...messages, { role: 'assistant', content: JSON.stringify(call) }, { role: 'user', content: `The tracker rejected this round:\n${feedback}\n\n${contractNote('Fix only what was rejected. Narration must match what actually happens.')}`}];
-    attempt += 1;
-  }
-
-  if (result && !result.ok && fallback && call) {
-    // Second failure: commit what is valid, drop what is not, and let the DM hear the difference.
-    result = resolveRound(g, call, { mode: 'fallback', rules_refs: needed.refs });
-    const dropped = result.rejected.map((r) => `${r.code}: ${r.reason}`).join(' ');
-    result.narration_dropped = dropped;
-  }
-  return { call, result, rules_refs: needed.refs };
-}
 
 /**
  * Barks: lines that cannot be wrong. When the gate withholds narration it is not offering a gap in the
@@ -229,12 +82,17 @@ function queueArt(g, jobs, ctx) {
   }
 }
 
+/** Delegates to the single shared turn (game/gm.mjs) - see the note on the import above. */
+async function runTurn(g, ctx, { fallback = true } = {}) {
+  return runTurnShared(g, { ctx, fallback, schema, notify: (m, k) => ctx.ui?.notify?.(m, k) });
+}
+
 function statusLine(g) {
   if (!g) return 'no campaign';
   const slots = [1, 2, 3, 4].map((s) => {
     const c = g.characters[s];
     if (!c) return `${s}:-`;
-    const ready = g.intents.find((i) => i.slot === s) ? 'spoke' : skipped.has(s) ? 'skipped' : 'quiet';
+    const ready = g.intents.find((i) => i.slot === s) ? 'spoke' : afk.has(s) ? 'afk' : 'quiet';
     const items = Object.keys(c.inventory).map((id) => g.items[id].name);
     return `${s}:${c.name} L${c.level} ${ready} [${items.join(', ') || 'empty'}]`;
   });
@@ -263,10 +121,6 @@ export default function (pi) {
 
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (!game) return { content: [{ type: 'text', text: 'NO_CAMPAIGN: start one with /dm_new' }] };
-      // Advance the round and re-seed the contention order, exactly as /dm_round does: the
-      // interactive tool IS a round, so it must consume a round number and a fresh order seed.
-      // Without this the round and order seed never advance on the interactive path.
-      setIntents(game, game.intents.filter(Boolean).map((i) => ({ ...i })), {});
       const res = resolveRound(game, params, { mode: 'strict', rules_refs: rulesForCall(game, params.mutations || []).refs });
       queueArt(game, res.art_jobs, ctx);
       const text = res.ok
@@ -282,7 +136,7 @@ export default function (pi) {
     handler: async (args, ctx) => {
       const campaign = (args || '').trim() || `campaign-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}`;
       game = newGame(ensureRules(), { campaign });
-      skipped = new Set();
+      afk = new Set();
       ctx.ui.notify(`/dm_join <1-4> <name> <class> to seat players. /dm_round to play.`, 'info');
       ctx.ui.notify(statusLine(game), 'info');
       persist(ctx, game);
@@ -341,23 +195,20 @@ export default function (pi) {
     },
   });
 
-  // Per-slot auto-skip, named dm_skip on purpose: the old name dm_afk collided with the
-  // Pi-Stunkus bridge's AFK mode (Blarmo away from the keyboard), which is a different thing
-  // entirely and lives in another repo. This one only ever means "this player slot is absent".
-  pi.registerCommand('dm_skip', {
-    description: 'Auto-skip a slot every round (absent player): /dm_skip 3',
+  pi.registerCommand('dm_afk', {
+    description: 'Auto-skip a slot every round (AFK player): /dm_afk 3',
     handler: async (args, ctx) => {
       if (!game) return ctx.ui.notify('Start with /dm_new', 'error');
       const slot = Number((args || '').trim());
-      if (!Number.isInteger(slot)) return ctx.ui.notify('usage: /dm_skip <1-4>', 'error');
-      if (skipped.has(slot)) { skipped.delete(slot); return ctx.ui.notify(`slot ${slot} is back`, 'info'); }
-      skipped.add(slot);
-      ctx.ui.notify(`slot ${slotLabel(slot)} is now skipped - the DM narrates over them`, 'info');
+      if (!Number.isInteger(slot)) return ctx.ui.notify('usage: /dm_afk <1-4>', 'error');
+      if (afk.has(slot)) { afk.delete(slot); return ctx.ui.notify(`slot ${slot} is back`, 'info'); }
+      afk.add(slot);
+      ctx.ui.notify(`slot ${afkLabel(slot)} goes AFK - the DM narrates over them`, 'info');
     },
   });
 
   pi.registerCommand('dm_round', {
-    description: 'Run one round, or n rounds: /dm_round [n]. Skipped slots auto-skip.',
+    description: 'Run one round, or n rounds: /dm_round [n]. AFK slots auto-skip.',
     getArgumentCompletions: (prefix) => {
       const items = ['1', '2', '5', '10'].map((v) => ({ value: v, label: `rounds: ${v}` }));
       const f = items.filter((i) => i.value.startsWith(prefix));
@@ -367,8 +218,8 @@ export default function (pi) {
       if (!game) return ctx.ui.notify('Start with /dm_new', 'error');
       const n = Math.min(20, Math.max(1, Number((args || '').trim()) || 1));
       for (let r = 0; r < n; r++) {
-        // Skipped slots never owe an intent; everyone else is expected to have used /dm_intent.
-        const quiet = [1, 2, 3, 4].filter((s) => game.characters[s] && !skipped.has(s) && !game.intents.find((i) => i.slot === s));
+        // AFK slots never owe an intent; everyone else is expected to have used /dm_intent.
+        const quiet = [1, 2, 3, 4].filter((s) => game.characters[s] && !afk.has(s) && !game.intents.find((i) => i.slot === s));
         if (quiet.length) ctx.ui.notify(`slots ${quiet.join(', ')} issued no intent - the tracker treats them as silent, not absent`, 'info');
         setIntents(game, game.intents.filter(Boolean).map((i) => ({ ...i })), {});
         const { call, result } = await runTurn(game, ctx);
@@ -438,7 +289,7 @@ export default function (pi) {
   pi.registerEntryRenderer?.('dm-narration', (entry) => `GM: ${entry.content}`);
 }
 
-function slotLabel(slot) {
+function afkLabel(slot) {
   return game?.characters?.[slot]?.name || `slot ${slot}`;
 }
 

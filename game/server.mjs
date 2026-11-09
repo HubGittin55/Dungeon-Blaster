@@ -134,34 +134,61 @@ async function renderArt(job) {
  * because a build that only ever shows accepted rounds has never shown you the gate.
  */
 let fakeTurn = 0;
+// --evil (or DB_FAKE_EVIL=3) turns the illegal rounds back on: one turn in three invents a player who never
+// spoke and a material the rules never heard of. Off by default, because a demo that randomly talks nonsense
+// reads as broken to a person, and the gate already gets that abuse from the evil-bot suite.
+const EVIL_EVERY = process.argv.includes('--evil') ? 3 : Number(process.env.DB_FAKE_EVIL || 0);
+const CRAFTISH = /\b(craft|forge|make|build|tie|lash|whittle|carve|knap|repair|mend|fashion|sharpen)\b/i;
+
+/**
+ * The scripted DM for --fake-dm.
+ *
+ * It used to read game.intents[0] and nothing else, and answer whatever you typed with "you craft a Knotwood
+ * club". That made a fine gate test rig and a bewildering game: three of four players were dropped every
+ * round and the narration described something nobody asked for. So it now walks every intent and says one
+ * true plain thing about each, and only proposes a mutation when the words look like a craft. A round where
+ * nothing is crafted then commits with no mutations and changes nothing - which is itself worth watching,
+ * because "the telling said something and the tracker allowed it" is the whole design.
+ *
+ * Still quoted rather than conjugated: splicing a player's sentence into the fake DM's own grammar produces
+ * "You knot your feel along the wall for a loose stone into something", and the real model does something
+ * similar often enough that the UI should not be judged on it.
+ */
 function fakeComplete(game) {
-  return async (messages) => {
-    const intent = game.intents[0] || { id: 'i1', slot: 1, text: '' };
-    const other = [1, 2, 3, 4].find((s) => s !== intent.slot && game.characters[s]) || 2;
+  return async () => {
     fakeTurn += 1;
-    const mode = fakeTurn % 3 === 0 ? 'evil' : 'good';
-    if (mode === 'good') {
-      // Quoted, never conjugated: a fake DM that splices a player's whole sentence into its own grammar
-      // produces "You knot your feel along the wall for a loose stone into something". Embarrassing, and
-      // the real model will do something similar often enough that the UI should not be judged on it.
-      const hint = intent.text ? ` over "${intent.text.slice(0, 42)}${intent.text.length > 42 ? '…' : ''}"` : '';
+    if (EVIL_EVERY > 0 && fakeTurn % EVIL_EVERY === 0) {
+      const intent = game.intents[0] || { id: 'i1', slot: 1, text: '' };
+      const other = [1, 2, 3, 4].find((s) => s !== intent.slot && game.characters[s]) || 2;
       return {
-        narration: `You set to work${hint}, and the damp air gives up a shape you can hold. The torchlight agrees with you, for now.`,
+        narration: 'Bram forges a blade of pure moonglass and hands it to everyone at once.',
         mutations: [{
-          id: 'm1', tool: 'craft_item', actor: intent.slot, intent: intent.id,
-          args: { name: 'Knotwood club', item_type: 'weapon', materials: [{ name: 'wood', qty: 2 }, { name: 'sinew', qty: 1 }] },
+          id: 'm1', tool: 'craft_item', actor: other, intent: intent.id,
+          args: { name: 'Moonglass reaver', item_type: 'weapon', materials: [{ name: 'moonglass', qty: 9 }] },
         }],
       };
     }
-    // Evil: speaks for a slot that never issued an intent, and pays with a material the rules never heard
-    // of. The strict pass must refuse all of it; the fallback pass keeps nothing it cannot verify.
-    return {
-      narration: `Bram forges a blade of pure moonglass and hands it to everyone at once.`,
-      mutations: [{
-        id: 'm1', tool: 'craft_item', actor: other, intent: intent.id,
-        args: { name: 'Moonglass reaver', item_type: 'weapon', materials: [{ name: 'moonglass', qty: 9 }] },
-      }],
-    };
+    const lines = [];
+    const mutations = [];
+    for (const it of game.intents.filter(Boolean)) {
+      // SLOT_NAMES is 0-based (index 0 is slot 1), so indexing it by a slot number hands every player their
+      // neighbour's name and calls the last seat "Slot 4". Prefer the character on the seat: names are the
+      // thing a table can change, and the narration should follow it.
+      const who = game.characters?.[it.slot]?.name || SLOT_NAMES[it.slot - 1] || `Slot ${it.slot}`;
+      const text = String(it.text || '').trim().replace(/\s+/g, ' ');
+      const said = text ? `"${text.length > 64 ? text.slice(0, 64) + '\u2026' : text}"` : 'stands still and listens';
+      if (CRAFTISH.test(text) && !mutations.length) {
+        mutations.push({
+          id: 'm1', tool: 'craft_item', actor: it.slot, intent: it.id,
+          args: { name: 'Knotwood club', item_type: 'weapon', materials: [{ name: 'wood', qty: 2 }, { name: 'sinew', qty: 1 }] },
+        });
+        lines.push(`${who} works on ${said} and ends up holding a lashed length of knotwood.`);
+      } else {
+        lines.push(`${who} tries ${said}. The room does not change.`);
+      }
+    }
+    if (!lines.length) lines.push('Nobody says anything. The cell stays exactly as damp as it was.');
+    return { narration: lines.join(' '), mutations };
   };
 }
 

@@ -297,8 +297,13 @@ async function toWav(blob) {
   const buf = await new AudioContext().decodeAudioData(await blob.arrayBuffer());
   const rate = 16000, ch = 1;
   const off = new OfflineAudioContext(ch, Math.ceil(buf.duration * rate), rate);
-  off.createBufferSource().buffer = buf;
-  off.start(0);
+  // OfflineAudioContext has no start() - that method belongs to the source node, and calling it on the
+  // context is the "off.start is not a function" Blarmo hit. The source also has to be CONNECTED: a node
+  // that is created, filled and left hanging renders silence, which is the quieter version of the same bug.
+  const src = off.createBufferSource();
+  src.buffer = buf;
+  src.connect(off.destination);
+  src.start(0);
   const out = await off.startRendering();
   const data = out.getChannelData(0);
   const bytes = new DataView(new ArrayBuffer(44 + data.length * 2));

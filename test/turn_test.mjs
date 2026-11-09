@@ -160,6 +160,38 @@ await t('but a retry that LEARNED something still gets gated (the early-out must
   assert.equal(result.committed.length, 1);
 });
 
+await t('four players speaking in one round are all resolved by that round', async () => {
+  // Blarmo's complaint about the demo: one shared GM turn read like "it picked one action and ignored the
+  // rest". The engine was never the problem - it has always accepted mutations from every seat in a single
+  // round - but nothing in the suite proved it, so nothing stopped a host from being written to read only
+  // the first intent. This is the assertion that makes that a test failure instead of a playtest surprise.
+  const g = table([
+    { slot: 1, id: 'i1', text: 'kick in the door' },
+    { slot: 2, id: 'i2', text: 'listen along the wall' },
+    { slot: 3, id: 'i3', text: 'lash a wood shaft to a knot of sinew' },
+    { slot: 4, id: 'i4', text: 'pray to whoever owns this cellar' },
+  ]);
+  const { complete } = scripted(said('Four people do four things at once.', [
+    club('m1', 1, 'i1'), club('m2', 2, 'i2'), club('m3', 3, 'i3'), club('m4', 4, 'i4'),
+  ]));
+  const { result } = await runTurn(g, { complete });
+  assert.equal(result.ok, true, JSON.stringify(result.rejected));
+  assert.equal(result.committed.length, 4, 'a single round must be able to pay for all four seats');
+  assert.equal(Object.keys(g.items).length, 4, `four clubs should exist, saw ${Object.keys(g.items).length}`);
+});
+
+await t('a round with nothing to pay for still commits', async () => {
+  // The scripted DM now says "the room does not change" for intents it cannot act on, which means it ships
+  // narration with no mutations at all. If an empty round were rejected, an honest answer would look like a
+  // rules violation and the table would get a stock bark instead of the truth.
+  const g = table([{ slot: 1, id: 'i1', text: 'listen along the wall' }]);
+  const { complete } = scripted(said('You listen along the wall. The room does not change.', []));
+  const { result } = await runTurn(g, { complete });
+  assert.equal(result.ok, true, JSON.stringify(result.rejected));
+  assert.equal(result.committed.length, 0);
+  assert.match(result.turn_log.narration, /does not change/);
+});
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
 

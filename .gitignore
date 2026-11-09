@@ -2,6 +2,11 @@
 #   - the architecture PDF is the design source of truth and Blarmo holds the copy (his README says so)
 #   - the desktop screenshot is a screenshot of somebody's desktop
 #   - the vendor metadata dumps are 1.6 MB of HuggingFace API echo
+# NOTE ON IMAGES: there used to be blanket `*.png` / `*.jpg` lines here, which meant git silently
+# refused every image in the project - art candidates, UI captures, a reference frame from the die.
+# Screenshots are private because of *which* screenshots they are, not because PNGs are dangerous, so
+# the rule is now by path (`journal/`, `shots/`, `capture/`) and never by image extension. Adding an
+# extension ban back is a bug; test/ignore_test.mjs fails if one appears.
 *.pdf
 notes/hf_api.json
 notes/hf_tree.json
@@ -17,6 +22,25 @@ notes/type_enum.json
 
 saves/
 journal/
+shots/
+capture/
 *.pyc
 __pycache__/
 .DS_Store
+
+# Model weights never go in the repo - this repo is public and the DM model runs only on the
+# laptop. Nothing enforced that rule: a stray dl_model/quant_scan run with a relative output path
+# could drop a .gguf in-tree and `git add -A` would publish it. Ignore by extension so git refuses
+# first; if a binary ever genuinely belongs in the tree, `git add -f path` says so on purpose.
+*.gguf
+*.gguf-*
+*.safetensors
+*.safetensors.index.json
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.ggml
+*.bin
+models/
+

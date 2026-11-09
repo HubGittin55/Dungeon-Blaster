@@ -5,7 +5,12 @@
   "type": "module",
   "description": "Voice-driven LLM-run tabletop RPG: deterministic tracker, gate, and pi game master extension",
   "scripts": {
-    "test": "node test/gate_test.js"
+    "test": "node test/gate_test.js && node test/turn_test.mjs && node test/ignore_test.mjs",
+    "play": "powershell -NoProfile -ExecutionPolicy Bypass -File launch-alpha.ps1",
+    "game": "node game/server.mjs",
+    "game:fake": "node game/server.mjs --fake-dm"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

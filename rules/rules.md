@@ -274,3 +274,43 @@ mutation. Splitting the party is a later slice and would need per-slot positions
 Combat, damage, strain, soak, quests, shops and prices are **not** in the gate yet: `carve`, `soak` and
 `strain` exist as computed numbers on the sheet so the budget maths is real and testable, and nothing
 reads them for damage. Slice 4 makes them hurt.
+
+## Characters
+
+### rule.characters <!-- tags: character sheet create -->
+
+Four seats, four players. To take a seat you declare a name, one class, and how your points are spread.
+This is the character law; `rule.budget` is the *gear* law and the two are deliberately separate, because a
+level-1 hammer and a level-1 person are not allowed to share a budget just because the arithmetic looked
+similar.
+
+Players allocate the same five attributes gear is computed from - `might`, `agility`, `grit`, `focus`, `awe`
+- for one reason: armour leans on `grit` and a charm leans on `awe`, so a sheet that left them out would
+have to invent them the moment anyone put anything on. The UI is free to be kinder than the law and show
+Might, Agility and Wit (label for `focus`) first; `grit` is Toughness and `awe` is Presence.
+
+Every point must be spent and no attribute may start above `max_start`: a sheet with 9 points spent is not
+under-powered, it is illegal, and the tracker refuses the seat rather than rounding it. A class bonus is
+added by the tracker afterwards and may carry an attribute to 6. Four Brutes is a legal table and its own
+kind of problem.
+
+```json
+{
+  "attributes": [
+    { "name": "might",   "label": "Might",     "blurb": "Force, reach, the thing you hit hardest." },
+    { "name": "agility", "label": "Agility",   "blurb": "Speed, aim, not being there." },
+    { "name": "grit",    "label": "Toughness", "blurb": "Pain you agree to ignore. Armour leans here." },
+    { "name": "focus",   "label": "Wit",       "blurb": "Craft, reading, the plan that survives contact." },
+    { "name": "awe",     "label": "Presence",  "blurb": "What people do because you asked. Trinkets lean here." }
+  ],
+  "points": 10,
+  "min_start": 1,
+  "max_start": 5,
+  "max_after_class": 6,
+  "classes": [
+    { "name": "Brute",   "bonus": { "might": 1 },   "trick": "Something heavy is never in the way twice." },
+    { "name": "Cutter",  "bonus": { "agility": 1 }, "trick": "A door, a lock, or a pursuer: you may pick one per scene." },
+    { "name": "Charmer", "bonus": { "focus": 1 },   "trick": "Once per scene, someone tells you one true thing." }
+  ]
+}
+```

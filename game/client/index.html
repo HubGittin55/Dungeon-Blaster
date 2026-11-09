@@ -62,6 +62,46 @@
   #roll iframe { width:min(92vw,900px); height:min(70vh,620px); border:1px solid var(--line); border-radius:12px; background:#000 }
   .place { color:var(--dim); font-style:italic }
   .foot { font:11.5px/1.5 ui-monospace,monospace; color:#6b5c4c; margin-top:9px }
+  /* The room the party is standing in, at the size of the thing they are actually looking at. */
+  #hero{position:relative;aspect-ratio:16/9;max-height:46vh;background:#0c0906;border:1px solid #3a2a19;
+       border-radius:6px;overflow:hidden;display:grid;place-items:center;margin-bottom:14px}
+  #hero img{width:100%;height:100%;object-fit:cover;display:block}
+  #hero .hero-empty{padding:20px;text-align:center;color:#8a7157;font-style:italic;max-width:72%}
+  #hero .hero-name{position:absolute;left:0;right:0;bottom:0;padding:30px 14px 10px;
+       background:linear-gradient(transparent,#08060400 0,#08060473 45%,#080604 100%);font-size:15px;letter-spacing:.4px}
+  .scene{display:flex;gap:8px;margin:10px 0 2px}
+  .scene input{flex:1;min-width:0}
+  .cform{display:grid;gap:8px}
+  .cattr{display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center;margin-bottom:7px}
+  .cattr b{font-weight:600;font-size:13px}
+  .cattr .blurb{grid-column:1/3;color:#8a7157;font-size:11px;line-height:1.25}
+  .cattr .spin{display:flex;align-items:center;gap:6px}
+  .cattr .spin button{width:26px;padding:0;line-height:1.4}
+  .cattr .spin output{width:16px;text-align:center;font-variant-numeric:tabular-nums}
+  .cleft{font-size:12px;color:#c9a97f;margin-bottom:6px}
+  .cleft.odd{color:#e08b6a}
+  .c-err{color:#e08b6a;font-size:12px;white-space:pre-wrap}
+  .attrs{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0 2px}
+  .attrs span{font-size:11px;border:1px solid #4a3623;border-radius:3px;padding:1px 6px;color:#d8c09b}
+  .trick{font-size:11px;color:#8a7157;font-style:italic;margin:3px 0 6px}
+  .inv{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px}
+  .inv .it{display:inline-flex;align-items:center;gap:5px;border:1px solid #4a3623;border-radius:3px;padding:1px 7px;font-size:11px}
+  .inv .it i{font-style:normal}
+  .inv .it.queued{opacity:.7;border-style:dashed}
+  .inv .it img,.chip img{width:17px;height:17px;object-fit:contain;vertical-align:-4px}
+  /* A face in the corner of the chair: who is sitting there, not a decoration. */
+  .slot{position:relative}
+  .slot .face{position:absolute;top:9px;right:9px;width:52px;height:66px;object-fit:contain;
+       border:1px solid #4a3623;border-radius:4px;background:#0c0906;pointer-events:none}
+  .slot.creating .face{width:52px;height:66px}
+  .slot h3{padding-right:60px}
+  .cf{display:flex;gap:10px;align-items:flex-start;margin:4px 0 8px}
+  .cf .cfbox{display:grid;gap:6px;min-width:0;flex:1}
+  .cf .cfbox input{width:100%;min-width:0}
+  .cf .c-facedone{font-size:11px;color:#8a7157;min-height:14px}
+  .cf img{width:74px;height:94px;object-fit:contain;border:1px solid #4a3623;border-radius:4px;background:#0c0906}
+  .cf .cfnone{width:74px;height:94px;display:grid;place-items:center;border:1px dashed #3a2a19;border-radius:4px;
+       color:#5d4c3a;font-size:10px;text-align:center}
 </style>
 </head>
 <body>
@@ -80,14 +120,19 @@
 <main>
   <div>
     <section>
+      <div id="hero"><div class="hero-empty">This room has never been seen. Describe it below, then paint it.</div></div>
       <h2>The telling</h2>
       <div id="say">Four of you wake up in a damp cell with a door and a rumour of stairs. Say what you do, then press <b>Play round</b>.</div>
+      <div class="scene">
+        <input id="scene-desc" maxlength="400" placeholder="what does this place look like?">
+        <button id="paintbtn" title="Render the description and keep it: this room keeps this face for the rest of the campaign">Paint the room</button>
+      </div>
       <div id="blocked"></div>
       <div class="foot" id="stats"></div>
     </section>
 
     <section style="margin-top:16px">
-      <h2>Four voices, one couch</h2>
+      <h2>Four voices, one couch <button id="seatall" class="quiet" title="Deal four legal sheets and get on with it">Seat four at random</button></h2>
       <div class="slots" id="slots"></div>
       <div class="foot">The mic button records until you press it again, then hands the audio to the speech-to-text server. Nothing is sent to the game master until you accept the words in the box - the tracker treats a mishearing you did not look at as a real intent.</div>
     </section>
@@ -96,7 +141,7 @@
   <div>
     <section>
       <h2>Cards</h2>
-      <div class="cards" id="cards"><div class="foot">No art yet. Cards appear when the tracker creates or finds something.</div></div>
+      <div class="cards" id="cards"><div class="foot">No cards in play yet.</div></div>
     </section>
     <section style="margin-top:16px">
       <h2>What the tracker did</h2>
@@ -111,6 +156,14 @@
 const $ = (id) => document.getElementById(id);
 const say = $('say'), logEl = $('log'), cardsEl = $('cards');
 let busy = false;
+// The character law, read from the table rather than copied into this file: the creation form's minimum,
+// maximum, pool and class list are the rules' numbers, and a sheet built from a stale copy of them is a
+// form that looks legal until the server says otherwise.
+let LAW = null;
+// The last state the table was drawn from. Buttons that act on who is sitting ("seat four at random") need
+// to know which chairs are still empty, and asking the server for that on every click is a worse idea than
+// remembering what it last told us.
+let LAST = null;
 
 function log(msg, cls) {
   const line = document.createElement('div');
@@ -177,7 +230,30 @@ events.addEventListener('art', (e) => {
   el.querySelectorAll('.cap').forEach((c) => { c.textContent = `${a.job.kind} · ${a.job.subject_id}${a.why ? ` · ${a.why}` : ''}`; });
   cardsEl.prepend(el);
   while (cardsEl.children.length > 24) cardsEl.lastChild.remove();
+  deckSig = '';   // a fresh render changes what the deck holds; let the next state draw it
 });
+
+// The deck is the table's evidence: the room, and a card for everything actually in play. It is drawn from
+// state rather than from the art queue, so a reload shows the same pile - and it redraws only when the set
+// of URLs changes, because the table redraws on every event and a shuffling deck is worse than a stale one.
+let deckSig = '';
+function deck(s) {
+  const bits = [];
+  if (s.place && s.place.art) bits.push([s.place.name, s.place.art.url]);
+  for (const [m, url] of Object.entries(s.cards || {})) if (url) bits.push([`${m} \u00d7`, url]);
+  for (const p of s.slots || []) for (const it of (p.carrying || [])) if (it.own && it.art) bits.push([it.name, it.art]);
+  const sig = bits.map((b) => b[1]).join('|');
+  if (sig === deckSig) return;
+  deckSig = sig;
+  cardsEl.innerHTML = bits.length ? '' : '<div class="foot">Nothing drawn for yet - the room appears once someone describes it.</div>';
+  for (const [label, url] of bits) {
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.innerHTML = `<img src="${url}" alt=""><div class="cap"></div>`;
+    el.querySelector('.cap').textContent = label;
+    cardsEl.append(el);
+  }
+}
 
 events.addEventListener('roll', (e) => showRoll(JSON.parse(e.data).value));
 // The narrator's clip arrives from the server as a data URL. Browsers refuse the first unasked sound, so a
@@ -195,35 +271,175 @@ function mode(m) {
 }
 
 // ------------------------------------------------------------------ render
+/** Names in this game are written by a language model, so nothing that reaches innerHTML unescaped. */
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
 function draw(s) {
+  LAST = s;
+  if (s.law) LAW = s.law;
   $('place').textContent = s.place ? s.place.name : '…';
   $('round').textContent = `round ${s.round}`;
   mode(s.mode);
+  room(s.place);
+  deck(s);
   const box = $('slots');
   box.innerHTML = '';
-  for (const p of s.slots) {
-    const el = document.createElement('div');
-    el.className = `slot${p.intent ? ' spoke' : ''}`;
-    el.innerHTML = `<h3></h3><div class="sub"></div><div class="chips"></div>
-      <div class="row"><input placeholder="what do you do?" maxlength="200"><button class="mic" title="hold the couch's attention: record, then stop">🎙</button></div>
-      <div class="intent"></div>`;
-    el.querySelector('h3').textContent = `${p.slot} · ${p.name}`;
-    el.querySelector('.sub').textContent = `level ${p.level} ${p.class} · carrying ${p.carrying.length ? p.carrying.join(', ') : 'nothing'}`;
-    const chips = el.querySelector('.chips');
-    for (const [m, q] of Object.entries(p.materials)) {
-      const c = document.createElement('span'); c.className = 'chip have'; c.textContent = `${m} ×${q}`; chips.append(c);
-    }
-    if (!Object.keys(p.materials).length) chips.innerHTML = '<span class="chip">no materials</span>';
-    el.querySelector('.intent').textContent = p.intent ? `“${p.intent}”` : '';
-    const input = el.querySelector('input');
-    input.value = p.intent || '';
-    const commit = () => { const v = input.value.trim(); if (v) intent(p.slot, v); };
-    input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') commit(); });
-    // Blur counts as saying it. A box you typed in and clicked out of was, until now, a box that said nothing.
-    input.addEventListener('blur', commit);
-    el.querySelector('.mic').addEventListener('click', (ev) => record(p.slot, ev.currentTarget));
-    box.append(el);
+  for (const p of s.slots) box.append(p.seated ? seatedCard(p) : createCard(p.slot));
+}
+
+// The room, in words and then in pixels. A location with no art is not an error - it is a room nobody has
+// described yet, and the screen says so and offers the box that fixes it.
+const GLYPH = { weapon: '\u2694\ufe0f', armor: '\ud83d\udee1', shield: '\ud83d\udee1', tool: '\ud83d\udd28', trinket: '\u2728', consumable: '\u2697\ufe0f' };
+function room(place) {
+  const hero = $('hero');
+  if (!place) return;
+  hero.innerHTML = place.art
+    // The caption is the latest thing said about the room, which is not necessarily what the picture on
+    // screen was painted from: the art resolver serves the selected style, and the room may have been
+    // painted under a different one.
+    ? `<img src="${place.art.url}" alt="${esc(place.name)}"><div class="hero-name"><b>${esc(place.name)}</b> \u2014 ${esc(place.description || '')}</div>`
+    : `<div class="hero-empty"><b>${esc(place.name)}</b><br>${esc(place.description || '')}<br><i>never been seen &mdash; describe it below and paint it</i></div>`;
+  const box = $('scene-desc');
+  if (box && !box.value && !box.dataset.touched) box.placeholder = place.description || 'what does this place look like?';
+}
+
+/** A player who has declared themselves: sheet, kit, and their box for the next round. */
+function seatedCard(p) {
+  const el = document.createElement('div');
+  el.className = `slot playing${p.intent ? ' spoke' : ''}`;
+  el.dataset.slot = p.slot;
+  el.innerHTML = `<h3></h3><div class="sub"></div><div class="attrs"></div><div class="trick"></div>
+    <div class="inv"></div><div class="chips"></div>
+    <div class="row"><input placeholder="what do you do?" maxlength="200"><button class="mic" title="hold the couch's attention: record, then stop">\ud83c\udfa4</button></div>
+    <div class="intent"></div>`;
+  el.querySelector('h3').textContent = `${p.slot} \u00b7 ${p.name}`;
+  if (p.portrait) el.insertAdjacentHTML('afterbegin', `<img class="face" src="${p.portrait.url}" alt="${esc(p.class)}">`);
+  el.querySelector('.sub').textContent = `level ${p.level} ${p.class} \u00b7 ${p.xp || 0} xp`;
+  el.querySelector('.attrs').innerHTML = Object.entries(p.attributes || {}).map(([k, v]) => `<span>${k} ${v}</span>`).join('');
+  el.querySelector('.trick').textContent = (p.sheet && p.sheet.trick) || '';
+  // A dashed chip is a thing whose own picture has not landed yet: the icon shown is the card of its
+  // materials, which is the truth about what it is made of and a placeholder for what it looks like.
+  el.querySelector('.inv').innerHTML = (p.carrying || []).map((it) => `<span class="it${it.own ? '' : ' queued'}" title="${esc(it.own ? `painted from the table's own ${it.name}` : `not painted yet - showing ${it.made_of || 'the card for something else'}`)}">${it.art ? `<img src="${it.art}" alt="">` : `<i>${GLYPH[it.type] || '\u25c7'}</i>`}${esc(it.name)}</span>`).join('') || '<span class="chip">nothing yet</span>';
+  const chips = el.querySelector('.chips');
+  for (const [m, q] of Object.entries(p.materials)) {
+    const c = document.createElement('span'); c.className = 'chip have';
+    const url = (LAST && LAST.cards) ? LAST.cards[m] : null;
+    c.innerHTML = `${url ? `<img src="${url}" alt="">` : ''}${esc(m)} \u00d7${q}`;
+    chips.append(c);
   }
+  if (!Object.keys(p.materials).length) chips.innerHTML = '<span class="chip">no materials</span>';
+  el.querySelector('.intent').textContent = p.intent ? `\u201c${p.intent}\u201d` : '';
+  const input = el.querySelector('input');
+  input.value = p.intent || '';
+  const commit = () => { const v = input.value.trim(); if (v) intent(p.slot, v); };
+  input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') commit(); });
+  // Blur counts as saying it. A box you typed in and clicked out of was, until now, a box that said nothing.
+  input.addEventListener('blur', commit);
+  el.querySelector('.mic').addEventListener('click', (ev) => record(p.slot, ev.currentTarget));
+  return el;
+}
+
+/**
+ * A chair nobody has sat in yet.
+ *
+ * The draft lives outside the card because the table redraws on every event: a character you were mid-way
+ * through building must not evaporate because someone else finished theirs. Points are not checked here -
+ * the rules decide that, and whatever they say is printed under the form unchanged.
+ */
+const drafts = {};
+function draftOf(slot) {
+  if (!drafts[slot] && LAW) {
+    drafts[slot] = { name: '', cls: LAW.classes[0].name, attributes: Object.fromEntries(LAW.attributes.map((a) => [a.name, LAW.min_start])) };
+  }
+  return drafts[slot];
+}
+
+function createCard(slot) {
+  const d = draftOf(slot);
+  const el = document.createElement('div');
+  el.className = 'slot creating';
+  const spent = () => Object.values(d.attributes).reduce((a, b) => a + b, 0);
+  el.innerHTML = `<h3>Seat ${slot} &mdash; nobody yet</h3>
+    <div class="row"><input class="c-name" placeholder="name" maxlength="24"></div>
+    <select class="c-cls">${(LAW?.classes || []).map((c) => `<option${c.name === d.cls ? ' selected' : ''}>${c.name}</option>`).join('')}</select>
+    <div class="trick"></div>
+    <div class="cf"><div class="cfimg"></div><div class="cfbox"><input class="c-face" placeholder="what do they look like?" maxlength="200"><button class="c-facego" title="Say it and see them: the words are the identity, so the same description paints the same face">Paint them</button><div class="c-facedone"></div></div></div>
+    <div class="cattr"></div><div class="cleft"></div>
+    <div class="row"><button class="c-go big">Sit down</button><button class="c-rand">Deal me in</button></div>
+    <div class="c-err"></div>`;
+  el.querySelector('.c-name').value = d.name;
+  el.querySelector('.trick').textContent = (LAW?.classes.find((c) => c.name === d.cls) || {}).trick || '';
+  // Show the face the class has, and change it when the class changes: choosing a class from three words is
+  // a filing decision, choosing one from a face is a character.
+  const face = () => {
+    const url = (d.face && d.face.url) || (LAST?.class_faces || {})[d.cls];
+    el.querySelector('.cfimg').innerHTML = url ? `<img src="${url}" alt="${esc(d.cls)}">` : '<div class="cfnone">no portrait<br>drawn yet</div>';
+  };
+  face();
+  el.querySelector('.c-face').value = d.faceText || '';
+  // Say what they look like, see them. This is the trick the whole build exists for, applied to a player
+  // character instead of a corridor: a sentence, a few seconds, a face that stays theirs for the campaign.
+  el.querySelector('.c-facego').addEventListener('click', async () => {
+    const description = el.querySelector('.c-face').value.trim();
+    const note = el.querySelector('.c-facedone');
+    const btn = el.querySelector('.c-facego');
+    if (description.length < 8) { note.textContent = 'one sentence, please - a face needs more than "a guy"'; return; }
+    btn.disabled = true; note.textContent = 'painting\u2026';
+    try {
+      const r = await fetch('/api/portrait', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) note.textContent = `no luck: ${j.error || 'the image server said no'}`;
+      else { d.face = { id: j.id, prompt: description, url: j.url }; note.textContent = `seed ${j.seed} - that is them`; face(); }
+    } catch (e) { note.textContent = `the image server did not answer (${e.message})`; }
+    btn.disabled = false;
+  });
+  el.querySelector('.c-face').addEventListener('input', (ev) => { d.faceText = ev.target.value; });
+  const grid = el.querySelector('.cattr');
+  const note = el.querySelector('.cleft');
+  const go = el.querySelector('.c-go');
+  const say = () => {
+    const left = LAW.points - spent();
+    note.textContent = left === 0 ? 'ready \u2014 every point spent' : `${left} point${Math.abs(left) === 1 ? '' : 's'} ${left > 0 ? 'left' : 'over'} to spend`;
+    note.classList.toggle('odd', left !== 0);
+    go.disabled = left !== 0;
+  };
+  for (const a of (LAW?.attributes || [])) {
+    const row = document.createElement('div');
+    row.className = 'cattr';
+    row.innerHTML = `<b>${a.label}</b><span class="spin"><button type="button">&minus;</button><output>${d.attributes[a.name]}</output><button type="button">+</button></span><span class="blurb">${a.blurb || ''}</span>`;
+    const out = row.querySelector('output');
+    const [minus, plus] = row.querySelectorAll('button');
+    const step = (n) => {
+      const v = d.attributes[a.name] + n;
+      if (v < LAW.min_start || v > LAW.max_start) return;
+      if (n > 0 && LAW.points - spent() <= 0) return;
+      d.attributes[a.name] = v;
+      out.textContent = v;
+      say();
+    };
+    minus.addEventListener('click', () => step(-1));
+    plus.addEventListener('click', () => step(1));
+    grid.append(row);
+  }
+  say();
+  el.querySelector('.c-name').addEventListener('input', (ev) => { d.name = ev.target.value; });
+  el.querySelector('.c-cls').addEventListener('change', (ev) => {
+    d.cls = ev.target.value;
+    el.querySelector('.trick').textContent = (LAW.classes.find((c) => c.name === d.cls) || {}).trick || '';
+    face();
+  });
+  const send = async (extra) => {
+    const err = el.querySelector('.c-err');
+    err.textContent = '';
+    const r = await fetch('/api/seat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ slot, ...extra }) });
+    const j = await r.json().catch(() => ({}));
+    // The rules' own words in their own order: which attribute, what range, what total. Nothing is softened.
+    if (!r.ok) err.textContent = (j.rejected || [{ reason: j.error || 'refused' }]).map((x) => x.reason).join('\n');
+    else delete drafts[slot];
+  };
+  go.addEventListener('click', () => send({ name: d.name.trim() || `Player ${slot}`, cls: d.cls, attributes: d.attributes, face: d.face }));
+  el.querySelector('.c-rand').addEventListener('click', () => send({ random: true }));
+  return el;
 }
 
 async function intent(slot, text) {
@@ -242,11 +458,14 @@ function setBusy(b) { busy = b; $('go').disabled = b; $('go').textContent = b ? 
  * playing a round collects whatever is in the boxes first, in seat order, and says how many it sent: a round
  * with no actions in it should be visibly odd, not silently theatrical.
  */
+// Only cards with a data-slot belong to a seated player. A creation form also has a text box in it - its
+// name field - and handing "Aldric the Bold" to the game master as an action is exactly the sort of thing
+// that used to happen whenever a selector walked every input on screen.
 async function flushIntents() {
   const sends = [];
-  document.querySelectorAll('#slots .slot').forEach((el, i) => {
+  document.querySelectorAll('#slots .slot[data-slot]').forEach((el) => {
     const v = (el.querySelector('input')?.value || '').trim();
-    if (v) sends.push(intent(i + 1, v));
+    if (v) sends.push(intent(Number(el.dataset.slot), v));
   });
   await Promise.all(sends);
   return sends.length;
@@ -260,6 +479,29 @@ $('go').addEventListener('click', async () => {
   const r = await fetch('/api/round', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   if (r.status !== 202) { log(`round refused: ${r.status}`, 'err'); setBusy(false); }
 });$('newbtn').addEventListener('click', () => fetch('/api/new', { method: 'POST' }).then(() => log('new table dealt')));
+// Describe the room, paint the room. The render takes a few seconds on the GPU and is recorded in the
+// manifest, so this is the last time anybody has to ask what this corridor looks like.
+$('paintbtn').addEventListener('click', async () => {
+  const box = $('scene-desc');
+  const description = box.value.trim();
+  if (!description) return log('describe the place first - one sentence is enough to paint from', 'warn');
+  box.dataset.touched = '1';
+  $('paintbtn').disabled = true;
+  log('painting the room\u2026');
+  try {
+    const r = await fetch('/api/scene', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, generate: true }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) log(`could not paint: ${j.error}`, 'err');
+    else log(`the room is painted (${j.art.file}, seed ${j.art.seed}) - it keeps this face`);
+  } catch (e) { log(`painting failed: ${e.message}`, 'err'); }
+  $('paintbtn').disabled = false;
+});
+$('seatall').addEventListener('click', async () => {
+  const open = (LAST?.seats_open) || [1, 2, 3, 4];
+  for (const slot of open) await fetch('/api/seat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ slot, random: true }) });
+  log(`dealt ${open.length} sheet${open.length > 1 ? 's' : ''} \u2014 the rules checked each one`);
+});
+$('scene-desc').addEventListener('input', (ev) => { ev.target.dataset.touched = '1'; });
 $('voicebtn').addEventListener('click', async () => {
   log('rendering a line of narration\u2026');
   try {

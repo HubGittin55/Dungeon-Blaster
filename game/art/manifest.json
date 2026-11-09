@@ -3,10 +3,67 @@
  "style": "finnstark",
  "styleTag": "Anato Finnstark fantasy illustration with bold linework",
  "engine": "qwen",
- "generated": "2026-11-09T21:21:57.284Z",
+ "generated": "2026-11-09T23:36:16.173Z",
  "workflow": "qwen_image_21-basic_t2i-1 (rebuilt as API graph, prompt enhancer off)",
  "steps": 8,
  "assets": [
+  {
+   "id": "face_brute",
+   "kind": "portrait",
+   "tier": null,
+   "engine": "qwen",
+   "file": "finnstark/face_brute.png",
+   "w": 704,
+   "h": 896,
+   "seed": 1365689512,
+   "sha256": "c9f979ec43360adf3bc238c3fc05c8e9d02b9a378484ead6fdd12da948c242c1",
+   "alpha": {
+    "min": 0,
+    "mean": 134.3,
+    "transparent": 0.492,
+    "corner": 1
+   },
+   "cut_out": true,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a squat patient brute with a broken nose, shaved head, one rope of a braid, soot settled into an old scar, heavy shoulders, quiet grin, fantasy adventurer character portrait, head and shoulders, three-quarter view, painted bust, plain dark ground, floating on nothing, no frame, no border, no words, no lettering, no text."
+  },
+  {
+   "id": "face_charmer",
+   "kind": "portrait",
+   "tier": null,
+   "engine": "qwen",
+   "file": "finnstark/face_charmer.png",
+   "w": 704,
+   "h": 896,
+   "seed": 1953815121,
+   "sha256": "3dc3a739f7c1fff9804f13ef60a1fba8b3c1d4a1fdf34a9ddc853a65e6962a8d",
+   "alpha": {
+    "min": 252,
+    "mean": 255,
+    "transparent": 0,
+    "corner": 255
+   },
+   "cut_out": false,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a warm-voiced charmer with tidy dark hair, one brass earring, a borrowed noble cloak, an expression that already knows your name, fantasy adventurer character portrait, head and shoulders, three-quarter view, painted bust, plain dark ground, floating on nothing, no frame, no border, no words, no lettering, no text."
+  },
+  {
+   "id": "face_cutter",
+   "kind": "portrait",
+   "tier": null,
+   "engine": "qwen",
+   "file": "finnstark/face_cutter.png",
+   "w": 704,
+   "h": 896,
+   "seed": 1679765887,
+   "sha256": "16a5a30a4764436292dcfdd16bb7c4fef39c2f527f8bb9eb9fd34ea6dff791d4",
+   "alpha": {
+    "min": 253,
+    "mean": 254.9,
+    "transparent": 0,
+    "corner": 255
+   },
+   "cut_out": false,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a lean quick-eyed youth, ink-stained fingers, hood pushed back, a thin scar through one eyebrow, small knowing smile, fantasy adventurer character portrait, head and shoulders, three-quarter view, painted bust, plain dark ground, floating on nothing, no frame, no border, no words, no lettering, no text."
+  },
   {
    "id": "mat_basilisk-scale",
    "kind": "material",
@@ -616,6 +673,63 @@
    "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is a pale splinter of living root, damp and fibrous, single object filling the frame, bold black outline, one flat cast shadow to the lower right, floating on nothing, no ground, no table, no hands, no people, no words, no lettering, game crafting icon."
   },
   {
+   "id": "scene_corridor",
+   "kind": "environment",
+   "tier": null,
+   "engine": "qwen",
+   "file": "finnstark/scene_corridor.png",
+   "w": 1344,
+   "h": 768,
+   "seed": 1898154464,
+   "sha256": "5affb75a31f6e05560df9304247ccea5cc8a5669fca54945c5a94314cbe6dc94",
+   "alpha": {
+    "min": 252,
+    "mean": 254.9,
+    "transparent": 0,
+    "corner": 255
+   },
+   "cut_out": null,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. Full-bleed opaque painted background. The subject is long torchlit guard corridor, wet flagstones, arrow slits along one wall, a hanging iron brazier, two doors of banded wood, spear rack and a folded banner, deep perspective to a dark end, painted fantasy adventure background, wide establishing shot, deep perspective, empty of people, atmospheric depth, edge to edge, no words, no lettering, no text, no sigil."
+  },
+  {
+   "id": "scene_guardroom",
+   "kind": "environment",
+   "tier": null,
+   "engine": "qwen",
+   "file": "finnstark/scene_guardroom.png",
+   "w": 1344,
+   "h": 768,
+   "seed": 2082315088,
+   "sha256": "6fcbb98aa3f65e66f867342d281367ae45c845c0fd4f9e7005ae3bd6fcbe7103",
+   "alpha": {
+    "min": 251,
+    "mean": 255,
+    "transparent": 0,
+    "corner": 255
+   },
+   "cut_out": null,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. Full-bleed opaque painted background. The subject is abandoned guardroom, overturned stools, a brazier of cold ash, dice and a knife left on a trestle table, weapons nailed to the wall, a shut heavy door with a wicket, painted fantasy adventure background, wide establishing shot, deep perspective, empty of people, atmospheric depth, edge to edge, no words, no lettering, no text, no sigil."
+  },
+  {
+   "id": "scene_start",
+   "kind": "environment",
+   "tier": null,
+   "engine": "qwen",
+   "file": "finnstark/scene_start.png",
+   "w": 1344,
+   "h": 768,
+   "seed": 387402846,
+   "sha256": "c0db03dbad7cf8d3d4bd4f2daa6ec447d4406e479f9f663ce248a1a224618eb5",
+   "alpha": {
+    "min": 248,
+    "mean": 255,
+    "transparent": 0,
+    "corner": 255
+   },
+   "cut_out": null,
+   "prompt": "Anato Finnstark fantasy illustration with bold linework. Full-bleed opaque painted background. The subject is damp stone cell seen from the doorway, iron ring bolted in the wall, thin straw mattress, a drip caught in a chipped bowl, one high barred slot of grey light, moss at the feet of the door, wet flagstones, low ceiling, painted fantasy adventure background, wide establishing shot, deep perspective, empty of people, atmospheric depth, edge to edge, no words, no lettering, no text, no sigil."
+  },
+  {
    "id": "ui_button_plate",
    "kind": "ui",
    "tier": null,
@@ -766,7 +880,50 @@
    },
    "cut_out": true,
    "prompt": "Anato Finnstark fantasy illustration with bold linework. The image has a transparent background. The subject is game title logo reading DUNGEON BLASTER in carved angular fantasy lettering, brass rivets, a d20 replacing the A, bold black outline, one flat cast shadow, exactly that text and no other text, no subtitle."
+  },
+  {
+   "id": "face_89653f93d7af",
+   "style": "shinkai",
+   "kind": "portrait",
+   "subject_id": "face_89653f93d7af",
+   "file": "shinkai/face_89653f93d7af.png",
+   "w": 640,
+   "h": 800,
+   "seed": 1947178475,
+   "engine": "anima",
+   "sha256": "a1ec38598e181e5a5c680590e7c9fc486a06e194c7c2c822d45e597518200b4e",
+   "prompt": "portrait of a tall dry woman with a scribes stoop, one grey eyebrow, ink-stained fingers, an expression of patient disappointment, @makoto_shinkai style",
+   "at": "2026-11-09T23:42:04.801Z"
+  },
+  {
+   "id": "it_1_knotwoodclub_1",
+   "style": "shinkai",
+   "kind": "item",
+   "subject_id": "it_1_knotwoodclub_1",
+   "file": "shinkai/it_1_knotwoodclub_1.png",
+   "w": 640,
+   "h": 640,
+   "seed": 1001825593,
+   "engine": "anima",
+   "sha256": "191fa2ed3e2825b9f32dbb359a426817b8d511c3c5e865994e133c2f806c19ab",
+   "prompt": "Knotwood club, weapon, Common fantasy gear, anime RPG card art, @makoto_shinkai style",
+   "at": "2026-11-09T23:46:39.221Z"
+  },
+  {
+   "id": "scene_start",
+   "style": "shinkai",
+   "kind": "environment",
+   "subject_id": "scene_start",
+   "file": "shinkai/scene_start.png",
+   "w": 1024,
+   "h": 576,
+   "seed": 2143914908,
+   "engine": "anima",
+   "sha256": "a879efdd822e38042834a042f5c3146d93ebf3e04a0fa905fcd7771c5a1bbea7",
+   "prompt": "a flooded crypt, ankle-deep black water, one stone arch still standing, funeral niches bricked shut, @makoto_shinkai style",
+   "at": "2026-11-09T23:46:59.871Z"
   }
  ],
- "missing": []
+ "missing": [],
+ "updated": "2026-11-09T23:46:59.872Z"
 }

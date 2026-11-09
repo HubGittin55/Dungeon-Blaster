@@ -17,14 +17,15 @@ import { createServer } from 'node:http';
 import { existsSync, statSync } from 'node:fs';
 // node:fs/promises, not node:fs: fs.readFile without a callback resolves to undefined, so every static
 // file "does not exist" and every 404 looks like a wrong path instead of a wrong import.
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import {extname, join, normalize, resolve, sep } from 'node:path';
 import { randomUUID, randomInt } from 'node:crypto';
 import { loadRules } from '../tracker/rules_doc.js';
-import { newGame, joinSlot, addMaterials, setIntents, saveGame } from '../tracker/engine.js';
+import { newGame, joinSlot, addMaterials, setIntents, saveGame, takeSeat, characterLaw } from '../tracker/engine.js';
 import { runTurn, loadSchema, barkFor, RULES_PATH, ROOT, SLOT_NAMES, STARTING_KIT } from './gm.mjs';
-import { loadArt } from './art.mjs';
-import { ART_STYLES, DEFAULT_STYLE, resolveStyle } from './art/styles.mjs';
+import { loadArt, assetId } from './art.mjs';
+import { ART_STYLES, DEFAULT_STYLE, resolveStyle, styleTag } from './art/styles.mjs';
 import { readFile as readText, writeFile as writeText } from 'node:fs/promises';
 
 const PORT = Number(process.env.DB_GAME_PORT || 8765);
@@ -89,17 +90,144 @@ const schema = loadSchema();
 
 function freshTable() {
   const g = newGame(rules, { campaign: process.env.DB_CAMPAIGN || `alpha-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}` });
-  // Seated automatically: this is a couch demo, and /dm_join's four-name ritual is not a feature an
-  // alpha should make a stranger perform before they can see anything happen.
-  SLOT_NAMES.forEach((name, i) => {
-    const ch = joinSlot(g, i + 1, { name, class_label: 'wretch' });
-    addMaterials(g, i + 1, { ...STARTING_KIT }, 'starting kit');
-    return ch;
-  });
+  // Seats are deliberately EMPTY until each player declares a sheet under rule.characters. The alpha used to
+  // seat four named wretches so a stranger could see something move immediately; once there was a character
+  // law, an auto-seated fake person was worse than an empty chair - it nodded along, held kit, and could not
+  // be argued with. Four empty seats and a Create screen is the game asking who is playing.
   return g;
 }
 
 let g = freshTable();
+
+/**
+ * A legal sheet, dealt.
+ *
+ * "Surprise me" is a real way to start a four-player game on a couch, and the roll is only legal because it
+ * is built inside the same limits a human is held to: min on every attribute, nothing above the cap, exactly
+ * the pool spent. Random here means unposed, not unchecked - takeSeat still refuses it if it were not.
+ */
+function randomSheet(slot) {
+  const law = characterLaw(g);
+  const names = law.attributes.map((a) => a.name);
+  const attributes = Object.fromEntries(names.map((k) => [k, law.min_start]));
+  let left = law.points - names.length * law.min_start;
+  for (let guard = 0; left > 0 && guard < 500; guard++) {
+    const k = names[randomInt(names.length)];
+    if (attributes[k] < law.max_start) { attributes[k] += 1; left -= 1; }
+  }
+  return {
+    name: SLOT_NAMES[slot - 1] || `Player ${slot}`,
+    cls: law.classes[randomInt(law.classes.length)].name,
+    attributes,
+  };
+}
+
+// Table-time pictures come from the fast engine, and the fast engine has its own look: a scene painted in
+// three seconds during play belongs to the style whose tag the Anima workflow was tuned for, not to the
+// build-time style. The resolver happily serves across styles and reports which one it used.
+const TABLE_STYLE = (ART_STYLES.find((s) => (s.engine || 'anima') === 'anima') || {}).key || ART_STYLE;
+
+/**
+ * Draw something now, keep it forever.
+ *
+ * The live path used to return a ComfyUI URL and forget it: the same corridor would be rolled again next
+ * session as a different corridor, and a reload lost the picture. Saving the file and recording it in the
+ * manifest is what turns "generated" into "that place looks like that from now on".
+ */
+/**
+ * Draw something now, at table speed, and keep it.
+ *
+ * Everything the table invents goes through the fast engine (Anima, a couple of seconds), because the point
+ * of the game is saying a thing and seeing it. The build-time engine stays a build-time tool: it made the
+ * forty shipped cards, and it never appears in a turn. Style is chosen by the setting, not by which box the
+ * idea came from - the look of a game is an @artist tag, not a pipeline.
+ *
+ * The seed comes from the words. "a flooded crypt, ankle-deep black water" paints the same crypt next
+ * Saturday as it did tonight, which is the difference between a generated picture and *the* picture.
+ */
+function seedFor(style, id, prompt) {
+  return parseInt(createHash('sha256').update(`${style}:${id}:${prompt}`).digest('hex').slice(0, 8), 16) % 2147483647;
+}
+
+async function generateArt(job) {
+  if (!job.prompt_hint) return { ok: false, why: 'nothing to draw - describe it first' };
+  if (!existsSync(ART_TEMPLATE)) return { ok: false, why: `no ComfyUI workflow template at ${ART_TEMPLATE}` };
+  const style = job.style || TABLE_STYLE;
+  const [w, h] = job.size || [832, 832];
+  const id = assetId(job);
+  const prompt = `${job.prompt_hint}, ${styleTag(style)}`;
+  const seed = job.seed || seedFor(style, id, prompt);
+  const file = `${style}/${id}.png`;
+  try {
+    const wf = JSON.parse(await readFile(ART_TEMPLATE, 'utf8'));
+    const set = (nid, patch) => { if (wf[nid]) Object.assign(wf[nid].inputs, patch); };
+    set('67', { text: prompt });
+    set('68', { width: w, height: h, batch_size: 1 });
+    set('70', { seed, steps: job.steps || 6 });
+    set('9', { filename_prefix: `db-${job.kind}-${id}-${seed}` });
+    const r = await fetch(`${ART_URL}/prompt`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: wf, client_id: 'dungeon-blaster' }) });
+    if (!r.ok) return { ok: false, why: `ComfyUI ${r.status}: ${(await r.text()).slice(0, 160)}` };
+    const { prompt_id } = await r.json();
+    for (let i = 0; i < 240; i++) {
+      await new Promise((s) => setTimeout(s, 500));
+      const hist = await (await fetch(`${ART_URL}/history/${prompt_id}`)).json();
+      const img = hist?.[prompt_id]?.outputs && Object.values(hist[prompt_id].outputs).flatMap((o) => o.images || [])[0];
+      if (!img) continue;
+      const view = `${ART_URL}/view?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder || '')}&type=${img.type}`;
+      const buf = Buffer.from(await (await fetch(view)).arrayBuffer());
+      await mkdir(join(ART_DIR, style), { recursive: true });
+      await writeFile(join(ART_DIR, file), buf);
+      // Recorded against the style that drew it, so a live render of a pre-drawn subject becomes the picture
+      // for *that* style and leaves the other styles' files alone. The resolver picks per setting.
+      const rec = await art.record({ id, style, kind: job.kind, subject_id: job.subject_id, file, w, h, seed, engine: 'anima', sha256: createHash('sha256').update(buf).digest('hex'), prompt, at: new Date().toISOString() });
+      emit('art', { job, url: rec?.url || `/art/${file}`, pregen: false, asset: id, style });
+      return { ok: true, url: rec?.url || `/art/${file}`, file, id, seed, bytes: buf.length };
+    }
+    return { ok: false, why: 'ComfyUI produced nothing in 2 minutes' };
+  } catch (e) {
+    return { ok: false, why: `ComfyUI unreachable (${e.message}) - is :8188 up?` };
+  }
+}
+
+/**
+ * Paint whatever the tracker just minted, without stopping the game for it.
+ *
+ * Material cards are a fixed vocabulary: wood is wood in every campaign, so those forty were drawn once, at
+ * build time, by the build engine, and they are already on disk. Everything on this list exists only because
+ * the table invented it five seconds ago - this club, this potion, the NPC who just gave a name - so it is
+ * painted now by the fast engine, off the critical path. The round is already committed and the narration is
+ * already on its way to the speakers; four people must not watch a spinner because a club needs a face.
+ * Until it lands, the seat card shows the card of whatever the thing is made of: an honest placeholder that
+ * at least tells the truth about its own materials.
+ */
+const painting = new Set();
+function paintQueued(job) {
+  // The engine files rooms by location id; the client looks rooms up as scene_<id>. One convention, owned
+  // here, or a painted corridor and a looked-up corridor never meet.
+  const subject = job.kind === 'environment'
+    ? sceneJob(g.locations[job.subject_id] || { id: job.subject_id }).subject_id
+    : job.subject_id;
+  const key = `${job.kind}:${subject}`;
+  if (painting.has(key)) return;
+  // Already drawn? Then the table is looking at it, and nothing needs rendering. Checked here rather than
+  // inside generateArt, because the scene path deliberately re-paints: new words describe a new room.
+  const done = art.resolve({ kind: job.kind, subject_id: subject }, { style: artStyle });
+  if (done) { emit('art', { job, url: done.url, pregen: true, asset: done.id, style: done.style }); return; }
+  painting.add(key);
+  emit('log', { msg: `painting: ${job.kind} ${subject}` });
+  generateArt({ ...job, subject_id: subject })
+    .then((res) => {
+      if (res.ok) {
+        emit('art', { job, url: res.url, pregen: false, asset: res.id, style: String(res.file).split('/')[0] });
+        emit('state', publicState());
+        emit('log', { msg: `painted ${subject} (${Math.round((res.bytes || 0) / 1024)} KB, seed ${res.seed})` });
+      } else {
+        emit('log', { msg: `could not paint ${subject}: ${res.why}` });
+      }
+    })
+    .catch((e) => emit('log', { msg: `painting ${subject} fell over: ${e.message}` }))
+    .finally(() => painting.delete(key));
+}
 
 // ------------------------------------------------------------------ adapters
 
@@ -137,46 +265,6 @@ function speak(text, voice = 'dm') {
 // A voice line the player can click, because "the narrator is wired up" is not a thing anyone can believe
 // from a log line. Used by the Voice button, and by nothing else.
 const VOICE_TEST_LINE = 'Four of you wake up in a damp cell, with a door, and a rumour of stairs.';
-
-/** ComfyUI. Returns a viewable URL, or null with a reason the UI can show instead of a blank card. */
-async function renderArt(job) {
-  // Manifest first, in --fake-dm too: a manifest hit is the difference between a demo with pictures in it
-  // and a demo of grey boxes, and it costs a file check.
-  const pre = art.resolve(job, { style: artStyle });
-  // style_matches is reported upward rather than hidden: asking for shinkai and being served finnstark is
-  // correct behaviour (nothing else is rendered) and a lie by omission the player cannot debug.
-  if (pre) return { job, url: pre.url, pregen: true, asset: pre.id, style: pre.style, style_matches: pre.style_matches };
-  const rec = await art.miss(job);
-  if (!ART_LIVE) return { job, url: null, why: `${rec.why}; queued in game/art/queue.jsonl (set DB_ART_LIVE=1 to render now)` };
-  if (!existsSync(ART_TEMPLATE)) return { job, url: null, why: 'no ComfyUI workflow template (game/art/anima_card_api.json)' };
-  if (FAKE) return { job, url: null, why: 'art skipped in --fake-dm (no model, no reason to burn the GPU)' };
-  try {
-    const wf = JSON.parse(await readFile(ART_TEMPLATE, 'utf8'));
-    const [w, h] = job.size || [640, 640];
-    const seed = randomInt(1, 2 ** 31);
-    // Prefix varies with the seed on purpose: ComfyUI's prompt cache only misses when both change, and a
-    // cached hit would hand back the previous card for a different item.
-    const prefix = `db-${job.kind}-${job.subject_id}`;
-    const set = (id, patch) => { if (wf[id]) Object.assign(wf[id].inputs, patch); };
-    set('67', { text: job.prompt_hint });
-    set('68', { width: w, height: h, batch_size: 1 });
-    set('70', { seed, steps: job.steps || 6 });
-    set('9', { filename_prefix: `${prefix}-${seed}` });
-    const r = await fetch(`${ART_URL}/prompt`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: wf, client_id: 'dungeon-blaster' }) });
-    if (!r.ok) return { job, url: null, why: `ComfyUI ${r.status}: ${(await r.text()).slice(0, 120)}` };
-    const { prompt_id } = await r.json();
-    for (let i = 0; i < 120; i++) {
-      await new Promise((s) => setTimeout(s, 500));
-      const hist = await (await fetch(`${ART_URL}/history/${prompt_id}`)).json();
-      const out = hist?.[prompt_id]?.outputs;
-      const img = out && Object.values(out).flatMap((o) => o.images || [])[0];
-      if (img) return { job, url: `${ART_URL}/view?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder || '')}&type=${img.type}` };
-    }
-    return { job, url: null, why: 'ComfyUI produced nothing in 60s' };
-  } catch (e) {
-    return { job, url: null, why: `ComfyUI unreachable (${e.message})` };
-  }
-}
 
 // --------------------------------------------------------------------- fake DM
 
@@ -252,20 +340,55 @@ function emit(type, data) {
   for (const res of clients) { try { res.write(frame); } catch { /* gone */ } }
 }
 
+// Asset ids for the world's own subjects live here, in one place. A scene saved under a name the client
+// never asks for is a picture that exists and is never shown, which is indistinguishable from no art.
+const sceneJob = (loc) => ({ kind: 'environment', subject_id: `scene_${loc.id}` });
+const faceJob = (label) => ({ kind: 'portrait', subject_id: `face_${String(label || '').toLowerCase().replace(/[^a-z0-9]+/g, '_')}` });
+const cardUrl = (material) => { const a = art.resolve({ kind: 'material', subject_id: material }, { style: artStyle }); return a ? a.url : null; };
+
 function publicState() {
   const here = g.locations[g.party_location];
+  // Only the cards that are actually on the table. The client cannot look an asset id up by itself - the
+  // whole point of the resolver is that style and fallback are decided in one place - so the URLs travel
+  // with the state, and a material nobody holds costs nothing.
+  const inPlay = [...new Set([1, 2, 3, 4].flatMap((s) => Object.keys((g.characters[s] || {}).materials || {})))];
   return {
     campaign: g.campaign,
     round: g.round,
     order_seed: g.order_seed,
-    place: here,
+    // The room the party is in, with its art resolved. Front and centre because it is the first thing a
+    // player should see and the last thing they should have to ask for.
+    place: { ...here, art: art.resolve(sceneJob(here), { style: artStyle }) },
+    law: characterLaw(g),
+    seats_open: [1, 2, 3, 4].filter((s) => !g.characters[s]),
+    cards: Object.fromEntries(inPlay.map((m) => [m, cardUrl(m)])),
+    // Faces for the classes on offer, so the creation screen can show who you would be playing rather than
+    // making the choice from three words of flavour text.
+    class_faces: Object.fromEntries(characterLaw(g).classes.map((c) => [c.name, (art.resolve(faceJob(c.name), { style: artStyle }) || {}).url || null])),
     mode: FAKE ? 'fake-dm' : 'live-dm',
     slots: [1, 2, 3, 4].map((s) => {
       const c = g.characters[s];
       if (!c) return { slot: s, seated: false };
       return {
-        slot: s, seated: true, name: c.name, level: c.level, class: c.class_label,
-        carrying: Object.keys(c.inventory).map((id) => g.items[id].name),
+        slot: s, seated: true, name: c.name, level: c.level, class: c.class_label, xp: c.xp,
+        attributes: c.attributes, sheet: c.sheet || null,
+        // An item's face is the card of whatever it is mostly made of - the 32 material drawings do the
+        // work of 10,000 item drawings, and they are already on disk. `type` is a bare string in the
+        // tracker; an earlier draft of this line read `.type.name` and every glyph silently vanished.
+        carrying: Object.keys(c.inventory).map((id) => {
+          const it = g.items[id];
+          const type = typeof it.type === 'string' ? it.type : (it.type || {}).name || null;
+          const made_of = (it.materials_spent || [])[0]?.name || null;
+          // The thing's own face once the table has painted it; until then, the card of whatever it is mostly
+          // made of. Both are real pictures of real facts - only the second one is a placeholder.
+          const face = art.resolve({ kind: 'item', subject_id: it.id }, { style: artStyle })
+            || (made_of ? art.resolve({ kind: 'material', subject_id: made_of }, { style: artStyle }) : null);
+          const own = !!face && face.id === String(it.id);
+          return { id, name: it.name, type, tier: it.tier || 1, made_of, art: face ? face.url : null, own };
+        }),
+        // A face the table described wins over the class stock portrait; with nothing described, the class
+        // face is what you get, and both go through the same resolver.
+        portrait: art.resolve(c.face && c.face.id ? { kind: 'portrait', subject_id: c.face.id } : faceJob(c.class_label), { style: artStyle }),
         materials: Object.fromEntries(Object.entries(c.materials).filter(([, q]) => q > 0)),
         intent: (g.intents.find((i) => i.slot === s) || {}).text || null,
       };
@@ -296,15 +419,11 @@ async function playRound(count = 1) {
     const spoken = narration || bark;
 
     // Narration first, then the pictures: the sentence is what the players are waiting on, and a render
-    // in front of it is a hole in the audio.
+    // in front of it is a hole in the audio. So the renders are not awaited - the round payload reports what
+    // was asked for, and each picture arrives on its own `art` event when it lands.
     if (spoken) speak(spoken);
-    const art = [];
-    for (const job of result.art_jobs || []) {
-      emit('log', { msg: `art queued: ${job.kind} ${job.subject_id} (${job.size.join('x')}, ${job.steps} steps)` });
-      const res = await renderArt(job);
-      art.push(res);
-      emit('art', res);
-    }
+    const art = (result.art_jobs || []).map((job) => ({ job, url: null, queued: true, why: 'painting' }));
+    for (const job of result.art_jobs || []) paintQueued(job);
 
     emit('round', {
       round: g.round, spoken, narration, bark,
@@ -392,6 +511,87 @@ const server = createServer(async (req, res) => {
       const value = randomInt(1, 21);
       emit('roll', { value });
       return json(res, 200, { value });
+    }
+
+    /**
+     * Take a seat. Player-declared on purpose: there is no tool in the model's vocabulary that creates a
+     * character or spends points, because a game master that can allocate stats has already decided how the
+     * adventure goes. The rules do the arguing (see takeSeat) and the rejection comes back verbatim so the
+     * screen can show which line of the sheet is wrong.
+     */
+    if (req.method === 'POST' && path === '/api/seat') {
+      const p = JSON.parse((await body(req)).toString('utf8') || '{}');
+      const slot = Number(p.slot);
+      if (![1, 2, 3, 4].includes(slot)) return json(res, 400, { error: 'slot must be 1-4' });
+      if (p.random) {
+        const dealt = randomSheet(slot);
+        if (!p.name) p.name = dealt.name;
+        if (!p.cls) p.cls = dealt.cls;
+        if (!p.attributes) p.attributes = dealt.attributes;
+      }
+      const wasEmpty = !g.characters[slot];
+      const out = takeSeat(g, slot, { name: p.name, cls: p.cls, attributes: p.attributes });
+      if (!out.ok) return json(res, 400, { error: 'the rules refused this sheet', rejected: out.rejected });
+      // The kit follows an empty pair of hands, not "the first time this chair was used". Re-declaring a
+      // sheet before round one replaces the character object, and a character who sat down with nothing
+      // would never get the starting kit the rules imply. Nothing that already holds something is topped up,
+      // so this is not a way to print materials.
+      const ch = out.character;
+      // The described face travels with the sheet: words in, that face out, for as long as they play them.
+      if (p.face && typeof p.face.id === 'string') ch.face = { id: p.face.id.slice(0, 48), prompt: String(p.face.prompt || '').slice(0, 400) };
+      if (!Object.keys(ch.materials).length && !Object.keys(ch.inventory).length) addMaterials(g, slot, { ...STARTING_KIT }, 'starting kit');
+      emit('state', publicState());
+      emit('log', { msg: `slot ${slot} sits down: ${ch.name}, ${ch.class_label}${wasEmpty ? '' : ' (re-declared before play)'}` });
+      return json(res, 200, { ok: true, slot, seat: publicState().slots[slot - 1] });
+    }
+
+    /**
+     * Describe the room you are in, then paint it.
+     *
+     * The alpha shipped one sentence of stock furniture for the opening location and no way to change it.
+     * A campaign should start by saying what the place looks like and seeing that picture become the place -
+     * description, render, record, and the corridor keeps that face for the rest of the session.
+     */
+    if (req.method === 'POST' && path === '/api/scene') {
+      const p = JSON.parse((await body(req)).toString('utf8') || '{}');
+      const here = g.locations[g.party_location];
+      const desc = String(p.description || '').trim();
+      if (desc) { here.description = desc.slice(0, 400); here.prompt_hint = String(p.prompt_hint || desc).slice(0, 400); }
+      if (!p.generate) { emit('state', publicState()); return json(res, 200, { ok: true, place: here }); }
+      // Table resolution: the hero panel is 16:9 and the browser scales it, so the table gets its room in a
+      // couple of seconds instead of waiting on a print-resolution file. The build batch still ships 1344s.
+      const job = { ...sceneJob(here), prompt_hint: here.prompt_hint || here.description, size: [1024, 576], steps: 4 };
+      const done = await generateArt(job);
+      if (done.ok) here.art_asset_id = done.id;
+      emit('state', publicState());
+      return json(res, done.ok ? 200 : 502, done.ok ? { ok: true, place: here, art: done } : { error: done.why, place: here });
+    }
+
+    /** Draw one named subject now and keep it: used for the scene, and for anything else the table invents. */
+    if (req.method === 'POST' && path === '/api/art/generate') {
+      const p = JSON.parse((await body(req)).toString('utf8') || '{}');
+      const kind = String(p.kind || 'environment');
+      const subject_id = String(p.subject_id || g.party_location);
+      const done = await generateArt({ kind, subject_id, prompt_hint: String(p.prompt_hint || ''), size: p.size || [1024, 576], steps: p.steps || 6 });
+      if (!done.ok) return json(res, 502, { error: done.why });
+      emit('state', publicState());
+      return json(res, 200, done);
+    }
+
+    /**
+     * Speak a face into existence.
+     *
+     * Same rule as the room: the description is the identity, so the id is a hash of the words and "tall,
+     * scarred, one grey eyebrow" paints the same person tonight and next Saturday. Rendered by the fast
+     * engine because this happens while four people are waiting to start.
+     */
+    if (req.method === 'POST' && path === '/api/portrait') {
+      const p = JSON.parse((await body(req)).toString('utf8') || '{}');
+      const description = String(p.description || '').trim().slice(0, 400);
+      if (description.length < 8) return json(res, 400, { error: 'describe them in a sentence first - "a guy" is not enough to paint' });
+      const id = `face_${createHash('sha256').update(description.toLowerCase()).digest('hex').slice(0, 12)}`;
+      const done = await generateArt({ kind: 'portrait', subject_id: id, prompt_hint: `portrait of ${description}`, size: [640, 800], steps: 4 });
+      return json(res, done.ok ? 200 : 502, done.ok ? { ok: true, id, url: done.url, seed: done.seed } : { error: done.why });
     }
 
     if (req.method === 'POST' && path === '/api/voice_test') {

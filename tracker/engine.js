@@ -65,7 +65,7 @@ export function joinSlot(g, slot, { name, class_label = 'wanderer', attributes =
   if (![1, 2, 3, 4].includes(slot)) throw new Error(`slot must be 1-4, got ${slot}`);
   const nameCheck = validateName(g, name, 'npc_name');
   if (!nameCheck.ok) throw new Error(`character name rejected: ${nameCheck.reason}`);
-  const budget = get(g, 'rule.budget').data.stat_points['1'];
+  const law = characterLaw(g);
   const ch = {
     id: `ch_s${slot}`,
     slot,
@@ -73,7 +73,8 @@ export function joinSlot(g, slot, { name, class_label = 'wanderer', attributes =
     level: 1,
     xp: 0,
     class_label,
-    attributes: attributes || defaultAttributes(budget),
+    attributes: attributes || defaultAttributes(law),
+    sheet: null,
     portrait_asset_id: null,
     voice_notes: '',
     inventory: {}, // item_id -> qty
@@ -83,12 +84,91 @@ export function joinSlot(g, slot, { name, class_label = 'wanderer', attributes =
   return ch;
 }
 
-/** A level-1 sheet is a fixed 4-point pool; the player's description decides where it goes. */
-function defaultAttributes(points) {
-  const a = { might: 1, agility: 1, grit: 1, focus: 1, awe: 0 };
-  let left = Math.max(0, points - 3);
-  for (const k of ['might', 'agility', 'grit', 'focus', 'awe']) {
-    while (left > 0 && a[k] < 3) { a[k] += 1; left -= 1; }
+/**
+ * The character law. `rule.budget` is the gear law and stays that way on purpose: it is also used to size
+ * every item, so letting character creation borrow it meant changing a person's maths could silently
+ * rebalance a hammer. The two sections are allowed to look similar and must never be the same number.
+ */
+export function characterLaw(g) { return get(g, 'rule.characters').data; }
+
+/**
+ * Is this sheet legal?
+ *
+ * Checks what the rules say is checkable and nothing else: every point spent (a 9-point sheet is refused,
+ * not rounded down), every attribute inside the starting range, no attribute the rules never named, one of
+ * the listed classes. Stats themselves are never validated for balance - that is the point of a legal move.
+ */
+export function validateSheet(g, sheet = {}) {
+  const law = characterLaw(g);
+  const bad = [];
+  const cls = (law.classes || []).find((c) => c.name === sheet.cls);
+  if (!cls) bad.push(reject(null, 'UNKNOWN_CLASS', `class must be one of ${law.classes.map((c) => c.name).join(', ')}`));
+
+  const a = sheet.attributes || {};
+  const known = law.attributes.map((x) => x.name);
+  let spent = 0;
+  for (const attr of law.attributes) {
+    const v = a[attr.name];
+    if (!Number.isInteger(v)) {
+      bad.push(reject(null, 'BAD_ATTRIBUTE', `${attr.name} must be a whole number from ${law.min_start} to ${law.max_start}`, [`${attr.name}:${law.min_start}-${law.max_start}`]));
+      continue;
+    }
+    if (v < law.min_start || v > law.max_start) bad.push(reject(null, 'ATTRIBUTE_RANGE', `${attr.name} ${v} is outside ${law.min_start}-${law.max_start}`));
+    spent += v;
+  }
+  const extra = Object.keys(a).filter((k) => !known.includes(k));
+  if (extra.length) bad.push(reject(null, 'UNKNOWN_ATTRIBUTE', `not an attribute on a sheet: ${extra.join(', ')}`, known.map((k) => `${k}:1-${law.max_start}`)));
+  if (spent !== law.points) bad.push(reject(null, 'POINTS_MISMATCH', `spent ${spent}; a sheet must spend exactly ${law.points}`, [`points:${law.points}`]));
+
+  return bad.length ? { ok: false, rejected: bad } : { ok: true, cls, spent };
+}
+
+/**
+ * Take a seat with a declared sheet. Player-driven on purpose: the game master is never given a tool that
+ * spends someone's points, because a model that can allocate stats is a model that has already won.
+ */
+export function takeSeat(g, slot, { name, cls, attributes }) {
+  // A chair that has already played a round belongs to whoever is sitting in it. Re-declaring would be how
+  // you reroll a bad sheet mid-adventure, shrug off your own inventory, or drop a stranger into a body that
+  // has been carrying things for six rounds. Before the first round the table is still being built, so a
+  // mis-click is fixable; after that the seat is closed.
+  const prior = g.characters[slot];
+  if (prior && g.round > 0) {
+    return { ok: false, rejected: [reject(null, 'SEAT_TAKEN', `${prior.name} sits in slot ${slot}, and the table has played ${g.round} round${g.round === 1 ? '' : 's'}: a character already in play cannot be re-declared`)] };
+  }
+  const v = validateSheet(g, { cls, attributes });
+  if (!v.ok) return v;
+  // An existing character is kept byte-for-byte until the new sheet is proven, because the cap check below
+  // can still fail - and "your application was declined" must not be the message that arrives by deleting
+  // the character you were already playing.
+  const keep = prior ? JSON.parse(JSON.stringify(prior)) : null;
+  const ch = joinSlot(g, slot, { name, class_label: cls, attributes: { ...attributes } });
+  const law = characterLaw(g);
+  for (const [k, n] of Object.entries(v.cls.bonus || {})) ch.attributes[k] = (ch.attributes[k] || 0) + n;
+  ch.sheet = { class: cls, trick: v.cls.trick, allocated: { ...attributes }, points: law.points };
+  const over = Object.entries(ch.attributes).filter(([, n]) => n > law.max_after_class);
+  if (over.length) {
+    if (keep) g.characters[slot] = keep; else delete g.characters[slot];
+    return { ok: false, rejected: [reject(null, 'ATTRIBUTE_CAP', `${over.map(([k, n]) => `${k} ${n}`).join(', ')} exceeds ${law.max_after_class} after class`)] };
+  }
+  return { ok: true, character: ch };
+}
+
+/**
+ * A level-1 sheet is the character law's pool, spread evenly.
+ *
+ * It used to be four points from the gear budget dumped greedily, which meant every untouched seat walked in
+ * with the same lopsided body. Round-robin keeps an uncreated character boring rather than broken, and every
+ * point still has to land somewhere legal.
+ */
+function defaultAttributes(law) {
+  const a = {};
+  for (const attr of law.attributes) a[attr.name] = law.min_start;
+  const names = law.attributes.map((x) => x.name);
+  let left = law.points - names.length * law.min_start;
+  for (let i = 0; left > 0 && names.some((k) => a[k] < law.max_start); i++) {
+    const k = names[i % names.length];
+    if (a[k] < law.max_start) { a[k] += 1; left -= 1; }
   }
   return a;
 }

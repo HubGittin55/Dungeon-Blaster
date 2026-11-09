@@ -21,6 +21,8 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolveStyle } from './styles.mjs';
+import { loadRules } from '../../tracker/rules_doc.js';
+import { newGame, characterLaw } from '../../tracker/engine.js';
 import { renderQwen, QWEN } from './qwen.mjs';
 import { pngInfo } from './png.mjs';
 
@@ -89,6 +91,31 @@ const UI_ASSETS = {
   ui_dice_tray: ui(1024, 1024, 'empty worn wooden dice tray lined with faded green felt, a little sawdust and grit in the corner, top-down three-quarter view, bold black outline, no dice, no words, no lettering'),
 };
 
+/**
+ * Rooms and faces.
+ *
+ * The list of things to draw comes from the campaign itself (locations, classes) - this file only holds the
+ * sentence that describes how each one looks, and if the world grows a room with no description the batch
+ * stops rather than quietly shipping a table with an invisible corridor. Same discipline as MATERIAL_ART.
+ * Scenes are empty of people on purpose: a stranger in the background of every room reads as a character
+ * who exists, and the tracker has never heard of them.
+ */
+const SCENE_ART = {
+  start: 'damp stone cell seen from the doorway, iron ring bolted in the wall, thin straw mattress, a drip caught in a chipped bowl, one high barred slot of grey light, moss at the feet of the door, wet flagstones, low ceiling',
+  corridor: 'long torchlit guard corridor, wet flagstones, arrow slits along one wall, a hanging iron brazier, two doors of banded wood, spear rack and a folded banner, deep perspective to a dark end',
+  guardroom: 'abandoned guardroom, overturned stools, a brazier of cold ash, dice and a knife left on a trestle table, weapons nailed to the wall, a shut heavy door with a wicket',
+};
+const FACE_ART = {
+  brute: 'a squat patient brute with a broken nose, shaved head, one rope of a braid, soot settled into an old scar, heavy shoulders, quiet grin',
+  cutter: 'a lean quick-eyed youth, ink-stained fingers, hood pushed back, a thin scar through one eyebrow, small knowing smile',
+  charmer: 'a warm-voiced charmer with tidy dark hair, one brass earring, a borrowed noble cloak, an expression that already knows your name',
+};
+const SCENE_SUFFIX = ', painted fantasy adventure background, wide establishing shot, deep perspective, empty of people, atmospheric depth, edge to edge, no words, no lettering, no text, no sigil';
+// Portraits are framed busts on a plain dark ground, not cut-outs: "floating on nothing" and "plain dark
+// ground" are the same instruction only in the model's imagination, and it rightly painted a ground. Marked
+// opaque so the batch stops warning about a transparency this kind never asked for.
+const FACE_SUFFIX = ', fantasy adventurer character portrait, head and shoulders, three-quarter view, painted bust, plain dark ground, soft single light, no frame, no border, no words, no lettering, no text';
+
 const seedFor = (id) => parseInt(createHash('sha256').update(`${style.key}:${id}`).digest('hex').slice(0, 8), 16) % 2147483647;
 const rulesText = await readFile(RULES, 'utf8');
 const matBlock = rulesText.slice(rulesText.indexOf('"materials": ['));
@@ -111,6 +138,20 @@ for (const m of names) {
 }
 for (const [id, spec] of Object.entries(UI_ASSETS)) {
   assets.push({ id, kind: id.startsWith('ui_menu') || id.startsWith('ui_settings') ? 'backdrop' : 'ui', ...spec, opaque: spec.opaque || false });
+}
+
+// The world's own inventory of rooms and classes, read out of the engine at build time.
+const table = newGame(loadRules(fileURLToPath(RULES)), { campaign: 'pregen' });
+for (const [id, loc] of Object.entries(table.locations)) {
+  const desc = SCENE_ART[id];
+  if (!desc) { console.error(`no scene description for location "${id}" (${loc.name}) - the campaign has a room this batch cannot draw`); process.exit(1); }
+  assets.push({ id: `scene_${id}`, kind: 'environment', w: 1344, h: 768, opaque: true, prompt: `${desc}${SCENE_SUFFIX}` });
+}
+for (const cls of characterLaw(table).classes) {
+  const key = cls.name.toLowerCase();
+  const desc = FACE_ART[key];
+  if (!desc) { console.error(`no portrait description for class "${cls.name}" - the character law has a class this batch cannot draw`); process.exit(1); }
+  assets.push({ id: `face_${key}`, kind: 'portrait', w: 704, h: 896, opaque: true, prompt: `${desc}${FACE_SUFFIX}` });
 }
 const picked = only ? assets.filter((a) => a.id.includes(only)) : assets;
 if (!picked.length) { console.error(`--only ${only} matched nothing`); process.exit(2); }
@@ -170,14 +211,18 @@ for (const a of picked) {
 }
 
 // Manifest only ever describes what actually got written, so a partial run cannot claim a full set.
+// Keyed by id AND style directory - the same key art.mjs's record() uses. A batch rendered for one style must
+// not delete another style's file for the same subject just because the id matched: the table may have drawn
+// that corridor itself, in its own style, and that picture is somebody's canonical room now.
+const akey = (a) => `${a.id}|${String(a.file).split('/')[0]}`;
 const prior = existsSync(MANIFEST) ? JSON.parse(await readFile(MANIFEST, 'utf8')) : { assets: [] };
-const byId = new Map(prior.assets.map((a) => [a.id, a]));
-for (const a of done) byId.set(a.id, a);
+const byId = new Map((prior.assets || []).filter((a) => a && a.id && a.file).map((a) => [akey(a), a]));
+for (const a of done) byId.set(akey(a), a);
 const manifest = {
   schema: 'db-art-1', style: style.key, styleTag: style.tag, engine: ENGINE, generated: new Date().toISOString(),
   workflow: ENGINE === 'qwen' ? 'qwen_image_21-basic_t2i-1 (rebuilt as API graph, prompt enhancer off)' : 'anima_card_api.json',
   steps: ENGINE === 'qwen' ? QWEN.steps : 6,
-  assets: [...byId.values()].sort((x, y) => x.id.localeCompare(y.id)),
+  assets: [...byId.values()].sort((x, y) => `${x.id}/${x.file}`.localeCompare(`${y.id}/${y.file}`)),
   missing: failed.map((f) => f.id),
 };
 await writeFile(MANIFEST, JSON.stringify(manifest, null, 1) + '\n');

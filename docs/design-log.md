@@ -69,3 +69,45 @@ Until then, be precise about what is verified for the settings menu: the HTTP su
 requests (default, valid POST, malformed body 400, unknown style falls back and says so, choice survives a
 restart), the panel's JS parses with a real exit code, and the markup is served. The rendered panel has not
 been seen. Saying "menu works" would be a claim about pixels I have not looked at.
+
+## 2026-11-10 - which engine draws what (a correction from the couch)
+
+The art policy is now Blarmo's, not my inference: **crafting materials are a fixed vocabulary, so they are
+drawn once at build time; everything that exists only because the table said so is drawn at the table.**
+
+My first pass had this backwards. "Paint the room" went through the build engine because the result would
+"match the look" of the forty shipped cards - 20 seconds of waiting to protect an aesthetic, and a fork on
+engine, which is the thing the style registry already decided against (a style is an `@artist` tag, not a
+pipeline). The game's whole trick is saying a thing and seeing it, so the build engine is banned from turns.
+
+What I should have fixed instead: the manifest keyed one file per asset id, so a table render of `scene_start`
+*shadowed* the pre-drawn card and the shipped art became unreachable. Keyed by (id, style directory) now, with
+the same rule written in two places that have to agree (`art.mjs` record, `pregen.mjs` merge):
+
+- 32 material cards: `finnstark/`, build engine, rendered once, shown as crafting materials.
+- 4 rooms: `finnstark/scene_*.png` from the batch, `shinkai/scene_start.png` painted at the table in 3.6s.
+- faces: class stock portraits from the batch, plus any face a player described (`face_<hash of words>`).
+- items: runtime only. Every item picture in the game was drawn because somebody made the thing.
+
+Two things that fell out of doing it this way:
+
+**The words are the identity.** `seed = sha256(style:id:prompt)`, so "a flooded crypt, ankle-deep black water,
+funeral niches bricked shut" paints the same crypt next Saturday. Re-painting a room with *new* words is a new
+room - which is why the manifest-first shortcut lives in the caller (an item that is painted stays painted)
+and not inside the render function (a location with new words in it must never be served the old picture).
+
+**A placeholder has to say what it is standing in for.** The moment a club is minted its chip shows the card
+of whatever it is mostly made of, dashed, because that is a true picture of its materials and not yet a
+picture of itself. When the render lands the state re-emits, the dashed border goes, and the deck gains the
+card. Hover text says which of the two you are looking at.
+
+Measured on the 4060 laptop with ComfyUI and the DM both loaded: room 3.6s, face 3.6s, a minted item painted
+end-to-end 12s with a round in flight, never blocking the narration.
+
+## 2026-11-10 - a replace whose span you did not check is not an edit
+
+Rewriting `generateArt` with a span-anchored replace deleted three functions that lived between the anchors:
+`speak`, `speakNow`, `VOICE_TEST_LINE`, and (already dead) `renderArt`. `node --check` passed, the tests all
+passed - nothing but a live round caught it, and it caught it as `ReferenceError: speak is not defined` in a
+crashed server. The fix procedure worth keeping: diff the *set of top-level names* against HEAD and print what
+vanished. 40 seconds, and it names every casualty instead of the one you happened to click.

@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { loadRules } from '../tracker/rules_doc.js';
-import { newGame, joinSlot, addMaterials, setIntents, resolveRound, rulesForCall, computeItemStats, mutationHash } from '../tracker/engine.js';
+import { newGame, joinSlot, addMaterials, setIntents, resolveRound, rulesForCall, computeItemStats, mutationHash, takeSeat, validateSheet, characterLaw } from '../tracker/engine.js';
 
 const rules = loadRules(new URL('../rules/rules.md', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'));
 let pass = 0, fail = 0;
@@ -345,6 +345,121 @@ t("the item types the contract names are the engine's, spelled the engine's way"
     assert(new RegExp(`\\b${name}\\b`).test(schema), `contract never mentions '${name}', so the model cannot use it`);
   }
   assert(!/armour/.test(schema), "the contract taught the model 'armour'; the engine accepts 'armor'");
+});
+
+// ----------------------------------------------------------------- character sheets
+// A sheet is the one thing the model must never touch, so it is validated by the same gate discipline as a
+// mutation: refuse the whole thing, name the legal values, never quietly round a 9 up to 10.
+// min_start is 1, so the cheapest legal sheet is 1,1,1,1,1 with five left to place. My first fixture spent
+// awe:0 and the law refused it - the refusal was right and the fixture was the bug.
+const sheet = (over = {}) => ({ might: 3, agility: 3, grit: 2, focus: 1, awe: 1, ...over });
+const good = (over = {}) => ({ name: 'Bram', cls: 'Brute', attributes: sheet(), ...over });
+
+function seatAttempt(over) {
+  const g = newGame(rules, { campaign: 'sheet-test' });
+  return { g, out: takeSeat(g, 1, good(over)) };
+}
+
+t('a sheet must spend every point it is given, in both directions', () => {
+  for (const total of [9, 11]) {
+    const attrs = { might: 3, agility: 3, grit: 2, focus: 1, awe: 1 };
+    const spend = Object.values(attrs).reduce((a, b) => a + b, 0);
+    attrs.might += total - spend;
+    const { out } = seatAttempt({ attributes: attrs });
+    if (Math.max(...Object.values(attrs)) <= 5 && total !== 10) {
+      const codes = out.rejected.map((r) => r.code);
+      assert(codes.includes('POINTS_MISMATCH'), `spent ${total}: expected POINTS_MISMATCH, saw ${codes}`);
+      assert(JSON.stringify(out.rejected).includes('exactly 10'), 'the rejection must say what the total has to be');
+    }
+  }
+});
+
+t('an attribute outside the starting range is refused with the range attached', () => {
+  const { out } = seatAttempt({ attributes: sheet({ might: 6 }) });
+  const hit = out.rejected.find((r) => r.code === 'ATTRIBUTE_RANGE');
+  assert(hit, `expected ATTRIBUTE_RANGE, saw ${JSON.stringify(out.rejected)}`);
+  assert(/might 6/.test(hit.reason), hit.reason);
+  const half = seatAttempt({ attributes: sheet({ agility: 2.5 }) }).out;
+  assert(half.rejected.some((r) => r.code === 'BAD_ATTRIBUTE'), 'half a point is not a thing in this game');
+});
+
+t('a class the rules never listed is refused, and the legal ones are named', () => {
+  const { out } = seatAttempt({ cls: 'Paladin' });
+  const hit = out.rejected.find((r) => r.code === 'UNKNOWN_CLASS');
+  assert(hit, JSON.stringify(out.rejected));
+  for (const c of characterLaw(newGame(rules, { campaign: 'x' })).classes) {
+    assert(hit.reason.includes(c.name), `allowed list should name ${c.name}: ${hit.reason}`);
+  }
+});
+
+t('an invented attribute is refused rather than ignored', () => {
+  const a = sheet({ luck: 3 }); a.might -= 3;
+  const { out } = seatAttempt({ attributes: a });
+  const hit = out.rejected.find((r) => r.code === 'UNKNOWN_ATTRIBUTE');
+  assert(hit, `expected UNKNOWN_ATTRIBUTE, saw ${JSON.stringify(out.rejected)}`);
+  assert(/luck/.test(hit.reason), hit.reason);
+});
+
+t('a legal sheet seats the player, applies the class bonus, and keeps the trick', () => {
+  const { g, out } = seatAttempt();
+  assert(out.ok, JSON.stringify(out.rejected));
+  const ch = g.characters[1];
+  assert.equal(ch.attributes.might, 4, 'Brute adds 1 might on top of the buy');
+  assert.equal(ch.class_label, 'Brute');
+  assert.equal(ch.sheet.class, 'Brute');
+  assert(ch.sheet.trick.length > 10, 'the trick is the class, it has to survive to the screen');
+  assert.equal(Object.values(ch.sheet.allocated).reduce((a, b) => a + b, 0), 10, 'the law: ten points spent');
+});
+
+t('the class bonus may reach the after-class cap and no further', () => {
+  const law = characterLaw(newGame(rules, { campaign: 'x' }));
+  const a = { might: law.max_start, agility: law.min_start, grit: law.min_start, focus: law.min_start, awe: law.min_start };
+  // Spend the pool with might already at the cap; Brute then pushes might to max_after_class.
+  a.agility += law.points - Object.values(a).reduce((x, y) => x + y, 0);
+  const { g, out } = seatAttempt({ attributes: a });
+  assert(out.ok, JSON.stringify(out.rejected));
+  const got = g.characters[1].attributes.might;
+  assert(got <= law.max_after_class, `might ${got} exceeds the after-class cap ${law.max_after_class}`);
+});
+
+t('a sheet allocates exactly the attributes gear is computed from', () => {
+  // rule.item.types asks whether a trinket leans on awe; if awe is not on the sheet, the answer has to be
+  // invented somewhere. This is the test that stops the two laws from drifting apart again.
+  const g = newGame(rules, { campaign: 'x' });
+  const onSheet = characterLaw(g).attributes.map((a) => a.name).sort().join(',');
+  const onGear = rules.sections.find((s) => s.id === 'rule.budget').data.attributes.slice().sort().join(',');
+  assert.equal(onSheet, onGear, 'gear attributes and sheet attributes are the same list in two files');
+});
+
+t('an uncreated seat still spends the whole pool and never exceeds the cap', () => {
+  const g = newGame(rules, { campaign: 'x' });
+  const ch = joinSlot(g, 2, { name: 'Nobody', class_label: 'wanderer' });
+  const law = characterLaw(g);
+  const spent = Object.values(ch.attributes).reduce((a, b) => a + b, 0);
+  assert.equal(spent, law.points, `default sheet spent ${spent} of ${law.points}`);
+  for (const [k, v] of Object.entries(ch.attributes)) {
+    assert(v >= law.min_start && v <= law.max_start, `${k} ${v} outside ${law.min_start}-${law.max_start}`);
+  }
+});
+
+t('a seat that has already played a round cannot be re-declared', () => {
+  const { g } = seatAttempt();
+  // The round counter moves when the table declares its intents, so "has played" means someone has already
+  // had a turn, not merely that a resolution was run.
+  setIntents(g, [{ slot: 1, text: 'push the door' }]);
+  assert(resolveRound(g, { narration: 'the door stays a door.', mutations: [] }).ok, 'an empty round should still commit');
+  const again = takeSeat(g, 1, good());
+  const hit = (again.rejected || []).find((r) => r.code === 'SEAT_TAKEN');
+  assert(hit, `expected SEAT_TAKEN, saw ${JSON.stringify(again.rejected)}`);
+  assert(/played 1 round/.test(hit.reason), hit.reason);
+  assert.equal(g.characters[1].name, 'Bram', 'a refusal has to leave the character who was already playing intact');
+});
+
+t('re-declaring before the first round is allowed, and keeps the seat a seat', () => {
+  const { g } = seatAttempt();
+  const out = takeSeat(g, 1, good({ cls: 'Cutter' }));
+  assert(out.ok, JSON.stringify(out.rejected));
+  assert.equal(g.characters[1].class_label, 'Cutter', 'changing your mind at character creation is not a crime');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

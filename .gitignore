@@ -12,13 +12,11 @@ notes/hf_api.json
 notes/hf_tree.json
 notes/type_enum.json
 
-# Images are excluded everywhere EXCEPT pre-made art under game/art/,
-# which ships with the game. Runtime-generated art lives in C:/dm/art
-# outside the repo and is never committed.
-*.png
-*.jpg
-!game/art/
-!game/art/**
+# No image extension is banned anywhere in this file - Blarmo's call, 2026-11-08, and
+# test/ignore_test.mjs fails the tree if one comes back. Pre-made art under game/art/
+# ships with the game; runtime-generated art is written to C:/dm/art, which is outside
+# the repo, so it can never be committed by accident and needs no rule to keep it out.
+# What IS private is private by path: journal/, shots/, capture/ above.
 
 saves/
 journal/

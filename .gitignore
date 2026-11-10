@@ -13,10 +13,12 @@ notes/hf_tree.json
 notes/type_enum.json
 
 # No image extension is banned anywhere in this file - Blarmo's call, 2026-11-08, and
-# test/ignore_test.mjs fails the tree if one comes back. Pre-made art under game/art/
-# ships with the game; runtime-generated art is written to C:/dm/art, which is outside
-# the repo, so it can never be committed by accident and needs no rule to keep it out.
-# What IS private is private by path: journal/, shots/, capture/ above.
+# test/ignore_test.mjs fails the tree if one comes back. Pre-made art under game/art/ ships with the
+# game, and so does the art the table paints: a live Anima render of a room somebody described, or of
+# Glim the merchant, is written to game/art/<style>/ and committed with the seed that made it in
+# manifest.json. That is deliberate - "say it and see it" means the thing you said is still there next
+# Saturday - and the same sentence in the same style repaints the same picture, so nothing is lost by
+# keeping it out. What IS private is private by path: journal/, shots/, capture/ above.
 
 saves/
 journal/

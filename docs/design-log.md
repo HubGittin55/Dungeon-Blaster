@@ -249,3 +249,26 @@ attached. It found a real bug on its first run: my own assertion, which had froz
 part of "the world". The counter belongs to the round boundary (`setIntents` advances it), so an attempted
 turn consumes a number whether it commits or not. Whether a refused turn *should* be a round is a question
 for the rules owner, not something to redefine in a test.
+
+## 2026-11-10 - the test suite was painting into the thing it ships
+
+While committing the fixes above I noticed `game/art/manifest.json` kept gaining records named `evil`,
+`Windows_evil` and `Users_public_evil`, and three matching PNGs sitting in `game/art/shinkai/`. They were
+mine: the hostile subject ids in `test/http_test.mjs` (`../../../../Windows/evil`) are the same ids I
+audited by hand, and the art dir is `join(ROOT, 'game/art')` - so every run of the test suite rendered the
+attack payloads into the repo's shipped art library, and `git add -A` swept them into `d73ba44`. I committed
+attack debris as inventory and did not notice, which is the failure mode of `-A` with a suite that writes.
+
+Two rules follow. `ART_DIR` is now `DB_ART_DIR || join(ROOT, 'game/art')` - it needed an override anyway to
+run the game off a different disk - and the HTTP suite renders into a scratch directory under the OS temp
+dir and deletes it on the way out. The assertion is `git status` after a full run: shipped data unchanged,
+nothing but my own manifest prune.
+
+And a near-miss worth writing down because it was about to be worse than the bug. Cleaning the manifest I
+wrote an orphan check: "delete records whose file is not on disk". `file` is stored as
+`shinkai/face_brute.png` - the style directory is *already in the path* - and I joined the style on again,
+so it declared twenty legitimate records orphaned and deleted them. One line of output ("66 -> 46", when I
+expected "66 -> 63") was the only reason I looked, and `git checkout` put them back. So: when a cleanup
+script reports a number, read the number before you read the code, and never let it run against something
+you cannot restore. The same instinct that says *a tool that reports success and did nothing is a lie* also
+says *a tool that reports success and did too much is a worse one*.

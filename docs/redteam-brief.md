@@ -111,3 +111,24 @@ Found and fixed on 2026-11-10, all now covered by `test/http_test.mjs`:
 The command, what happened, what should have happened. If you can wrap it in `test/http_test.mjs` or
 `test/gate_test.js` and watch it fail, send that too — a hole with a failing test attached gets fixed the same
 hour, and a hole without one gets written down and loses the argument to whatever is on fire.
+
+## Added after the first review (commit d1cf90a) - now probed, do not re-report
+
+- **Quantities.** `qty` is a whole number >= 1 or the mutation is refused, on take/drop/transfer, and no
+  unit moves on a refused round. Negative quantities no longer add things to the world.
+- **Within-round spending.** Two mutations cannot spend the same material, inventory stack or item twice.
+  Each legal-alone pair (two crafts, two drops, two handoffs) is refused with a reason that names the
+  within-round shortage.
+- **Commit backstop.** `stateInvariants()` runs after every commit; if the world is impossible the state is
+  rolled back and the round is refused as `COMMIT_INVALID`. Try to make it fire - if you can reach an
+  impossible world that the backstop *misses*, that is the best finding available.
+- **One round at a time.** `POST /api/round` during a resolving turn answers 409 naming the round in
+  flight; `POST /api/new` mid-turn answers 409; a turn that lands after a reset is dropped and logged.
+- **Intents survive.** An intent posted during a turn is kept for the next round and the response says so
+  (`queued_for_round`, `in_flight`).
+- **Names.** `item_name` obeys the charset `rules/rules.md` declares; no name of any kind carries a control
+  character; a seat refused for a name is 400 `NAME_REJECTED`, never 500.
+- **The fuzz.** `test/redteam_law_test.mjs` plays 1,680 rounds of random mutation soup and fails on a
+  throw, an impossible world, a refused strict round that moved the world, or `ok: true` with a rejection
+  attached. `DB_FUZZ_SEEDS=...` to add your own seeds; a seed that fails is worth more than a written
+  report.

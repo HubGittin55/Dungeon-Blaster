@@ -65,7 +65,7 @@ async function modelId(origin, kind) {
 
 const ART_URL = process.env.DB_ART_URL || 'http://127.0.0.1:8188';
 const ART_TEMPLATE = process.env.DB_ART_TEMPLATE || join(ROOT, 'game/art/anima_card_api.json');
-const ART_DIR = join(ROOT, 'game/art');
+const ART_DIR = process.env.DB_ART_DIR || join(ROOT, 'game/art');
 const ART_STYLE = process.env.DB_ART_STYLE || DEFAULT_STYLE;
 // Pre-generated art is the normal path; ComfyUI is a build-time tool. Live rendering stays available for
 // the improvised stuff, but only when someone asks for it by name, because a render in the middle of a

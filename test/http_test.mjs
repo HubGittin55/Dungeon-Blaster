@@ -14,10 +14,18 @@
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { slug, assetId } from '../game/art.mjs';
 
+// A test that dirties a shipped data file is a bad test. This one used to: the scene and art routes paint
+// into the art dir, and the hostile subject ids in this very file (../../../../Windows/evil) ended up as
+// committed records in game/art/manifest.json plus three shipped PNGs named evil.png, Windows_evil.png
+// and Users_public_evil.png, which I committed myself in d73ba44 without noticing. So the suite renders
+// into a scratch dir and deletes it on the way out.
 const PORT = Number(process.env.DB_HTTP_TEST_PORT || 8799);
+const ART_SCRATCH = join(tmpdir(), `db-art-test-${PORT}`);
 const BASE = `http://127.0.0.1:${PORT}`;
 const GOOD_SHEET = { might: 3, agility: 3, grit: 2, focus: 1, awe: 1 };
 
@@ -67,7 +75,7 @@ if (probe === 'busy') {
 }
 
 const child = spawn(process.execPath, ['game/server.mjs', '--fake-dm'], {
-  env: { ...process.env, DB_GAME_PORT: String(PORT), DB_PERSIST: '0', DB_TTS_URL: '' },
+  env: { ...process.env, DB_GAME_PORT: String(PORT), DB_PERSIST: '0', DB_TTS_URL: '', DB_ART_DIR: ART_SCRATCH },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let output = '';
@@ -336,7 +344,7 @@ const stub = spawn(process.execPath, ['test/redteam/dm-stub.mjs'], {
 let stubOut = '';
 stub.stdout.on('data', (d) => { stubOut += d; }); stub.stderr.on('data', (d) => { stubOut += d; });
 const slow = spawn(process.execPath, ['game/server.mjs'], {
-  env: { ...process.env, DB_GAME_PORT: String(GPORT), DB_PERSIST: '0', DB_TTS_URL: '', DB_DM_URL: `http://127.0.0.1:${SPORT}` },
+  env: { ...process.env, DB_GAME_PORT: String(GPORT), DB_PERSIST: '0', DB_TTS_URL: '', DB_ART_DIR: ART_SCRATCH, DB_DM_URL: `http://127.0.0.1:${SPORT}` },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let slowOut = '';
@@ -413,6 +421,7 @@ if (!slowAlive()) {
   }
 }
 
+rmSync(ART_SCRATCH, { recursive: true, force: true }); // shipped data untouched, proved by git status afterwards
 running = false;
 stub.kill('SIGKILL');
 slow.kill('SIGKILL');

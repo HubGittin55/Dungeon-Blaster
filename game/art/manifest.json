@@ -1118,48 +1118,6 @@
    "sha256": "be212e12d0ca1c2672db5da50aacf759ef1297a204f4a1955d4b90a5c02c7785",
    "prompt": "Knotwood club, weapon, Common fantasy gear, anime RPG card art, @makoto_shinkai style",
    "at": "2026-11-10T02:06:59.619Z"
-  },
-  {
-   "id": "Windows_evil",
-   "style": "shinkai",
-   "kind": "environment",
-   "subject_id": "../../../../Windows/evil",
-   "file": "shinkai/Windows_evil.png",
-   "w": 1024,
-   "h": 576,
-   "seed": 1980543848,
-   "engine": "anima",
-   "sha256": "8c92e9946df9df3729055b295939591cd405126029022ca9baf0cebb0463a4f7",
-   "prompt": "a room, @makoto_shinkai style",
-   "at": "2026-11-10T02:12:17.299Z"
-  },
-  {
-   "id": "evil",
-   "style": "shinkai",
-   "kind": "environment",
-   "subject_id": "..\\..\\evil",
-   "file": "shinkai/evil.png",
-   "w": 1024,
-   "h": 576,
-   "seed": 1066033938,
-   "engine": "anima",
-   "sha256": "4b336324581d931789b1cf78920c61d3c6c9199e7f5d62b3be1b2212ca6d6227",
-   "prompt": "a room, @makoto_shinkai style",
-   "at": "2026-11-10T02:12:19.846Z"
-  },
-  {
-   "id": "Users_public_evil",
-   "style": "shinkai",
-   "kind": "environment",
-   "subject_id": "../../../Users/public/evil",
-   "file": "shinkai/Users_public_evil.png",
-   "w": 1024,
-   "h": 576,
-   "seed": 460372558,
-   "engine": "anima",
-   "sha256": "e981e11dcfb6b4de23095f89bef1248961c1ffe5baa114a7cf0492521cdb5a6d",
-   "prompt": "a room, @makoto_shinkai style",
-   "at": "2026-11-10T02:12:22.391Z"
   }
  ],
  "missing": [],

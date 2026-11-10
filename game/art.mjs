@@ -43,10 +43,31 @@ function candidateIds(job) {
 }
 
 /**
+ * An asset id is a filename stem, so it gets a filename's rights and no more.
+ *
+ * candidateIds() deliberately tries the raw subject id first - slug() maps '-' to '_', and every material the
+ * rules spell with a hyphen (mithral-ingot, deep-amber, 14 of the 32) then resolves to nothing. That is right
+ * for a lookup, which never touches the disk. It was not right for the write path: `/api/art/generate` takes a
+ * subject_id from the request, assetId handed it back verbatim, and `writeFile(join(ART_DIR, `${style}/${id}.png`))`
+ * meant a caller who named `../../../../Windows/evil` got a file written wherever they pointed. The GET side of
+ * this same server has checked its paths for a week; the write side was trusting a string from a browser.
+ */
+export function safeId(raw) {
+  // Every character in every asset id this game has ever written is [a-z0-9_-] - measured, not assumed. So a
+  // dot is not allowed either: it is legal in a filename and has no use here, and an id that survives as
+  // ".._.._Windows_win.ini" is safe but reads like an escape attempt to the next person debugging a 404.
+  const s = String(raw || '')
+    .replace(/[^A-Za-z0-9_-]/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 64);
+  return s || 'unnamed';
+}
+
+/**
  * The id an asset would be filed under. Exported because a render that is saved under a name the resolver
  * does not try is a picture nobody can find, and the name has to come from one place.
  */
-export function assetId(job) { return candidateIds(job)[0]; }
+export function assetId(job) { return safeId(candidateIds(job)[0] || 'unnamed'); }
 
 export function loadArt(artRoot, styleKey, { log = () => {} } = {}) {
   const manifestPath = join(artRoot, 'manifest.json');

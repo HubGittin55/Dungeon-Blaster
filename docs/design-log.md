@@ -143,3 +143,39 @@ The typewriter stays for narration as it lands - a reload should not re-perform 
 Also fixed in the same sweep, both invisible until a human looked: `introduce_npc` rendered portraits into the
 manifest that no screen ever asked for (NPCs are cards now, faces and all), and *New table* still logged "four
 seats filled" after the seats stopped filling themselves.
+
+## 2026-11-10 - the front door had no test, so four of its laws were already broken
+
+Went to hand this build to an outside reviewer and wrote down "here is how to attack it" first, which meant
+checking the claims. That turned into an afternoon of finding my own holes, and the reason they existed is
+simple: `gate_test.js` and `turn_test.mjs` cover the rules and the turn contract, and **nothing** exercised the
+HTTP surface the browser actually talks to. Four defects, all live, all in code I had read:
+
+- **A malformed JSON body answered 500 with a JavaScript parse error**, on six of seven routes. The repo states
+  as law that a malformed POST must 400. The rule was implemented six times by hand, guarded once, and checked
+  zero times - so a phone locking mid-request was a server fault, and the client was told it was one.
+- **`POST /api/art/generate {"subject_id":"../../../../Windows/evil"}` was an arbitrary file write.** Asset ids
+  came from `candidateIds()[0]`, which is the request's own string; renders are saved at
+  `game/art/<style>/<id>.png`. The *read* side of the same file had a containment check for a week and the write
+  side trusted a browser. Sanitised at the source (a filename stem is `[A-Za-z0-9_-]`, measured against every
+  id ever written) and re-checked on the joined path before anything is opened.
+- **Answering 413 destroyed the connection**, which poisoned the keep-alive socket: the *next* request hung for
+  300 seconds. From the couch that is indistinguishable from a crash, which is the worst property a refusal can
+  have. Bodies are now drained and discarded, so the answer arrives and the connection survives; only a genuine
+  flood (32 MB of it) gets closed.
+- **`"slot": [2]` was a legal way to sit in seat two**, because `Number([2]) === 2` while `"abc"` was correctly
+  refused. Coercion that accepts the JSON types nobody means is a hole shaped like convenience.
+
+Plus an unbounded `for await (const c of req)` on a laptop that is also holding a 35B model, a TTS model and an
+image renderer.
+
+`test/http_test.mjs` is the fix that matters more than any of the four: it boots the real server as a child
+process and drives it with fetch. Deliberately a real process - a mock server answers a 500 by not crashing,
+which is the one thing a mock cannot tell you. It refuses to run if its port is already answering, because
+testing whatever else is listening on 8799 is how a green run means nothing. Two of my own assertions were
+wrong on the first run (`sheet.attributes` is `sheet.allocated`; the order seed is a hex string, not a number)
+and one asserted a law I had invented on the spot - the state may carry `{id, name, tier}` for what is in play;
+what it may not carry is where a tier came from. 144 assertions now, 16 of them new.
+
+Written up as `docs/redteam-brief.md`: what to attack, in the order I found things, what is already probed, and
+- crucially for anyone else's evening - the seventeen behaviours that are laws and look like bugs.

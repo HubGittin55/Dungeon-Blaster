@@ -1076,8 +1076,50 @@
    "sha256": "8437ed278a71078d993ed4c64756dbae061150fb73658acd610046d5a645eea1",
    "prompt": "Stained Waterskin, trinket, Common fantasy gear, anime RPG card art, @makoto_shinkai style",
    "at": "2026-11-10T00:07:49.870Z"
+  },
+  {
+   "id": "Windows_evil",
+   "style": "shinkai",
+   "kind": "environment",
+   "subject_id": "../../../../Windows/evil",
+   "file": "shinkai/Windows_evil.png",
+   "w": 1024,
+   "h": 576,
+   "seed": 1980543848,
+   "engine": "anima",
+   "sha256": "8c92e9946df9df3729055b295939591cd405126029022ca9baf0cebb0463a4f7",
+   "prompt": "a room, @makoto_shinkai style",
+   "at": "2026-11-10T01:16:11.239Z"
+  },
+  {
+   "id": "evil",
+   "style": "shinkai",
+   "kind": "environment",
+   "subject_id": "..\\..\\evil",
+   "file": "shinkai/evil.png",
+   "w": 1024,
+   "h": 576,
+   "seed": 1066033938,
+   "engine": "anima",
+   "sha256": "4b336324581d931789b1cf78920c61d3c6c9199e7f5d62b3be1b2212ca6d6227",
+   "prompt": "a room, @makoto_shinkai style",
+   "at": "2026-11-10T01:16:13.814Z"
+  },
+  {
+   "id": "Users_public_evil",
+   "style": "shinkai",
+   "kind": "environment",
+   "subject_id": "../../../Users/public/evil",
+   "file": "shinkai/Users_public_evil.png",
+   "w": 1024,
+   "h": 576,
+   "seed": 460372558,
+   "engine": "anima",
+   "sha256": "e981e11dcfb6b4de23095f89bef1248961c1ffe5baa114a7cf0492521cdb5a6d",
+   "prompt": "a room, @makoto_shinkai style",
+   "at": "2026-11-10T01:16:16.371Z"
   }
  ],
  "missing": [],
- "updated": "2026-11-10T00:07:49.871Z"
+ "updated": "2026-11-10T01:16:16.371Z"
 }

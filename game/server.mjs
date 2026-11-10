@@ -164,6 +164,10 @@ async function generateArt(job) {
   const prompt = `${job.prompt_hint}, ${styleTag(style)}`;
   const seed = job.seed || seedFor(style, id, prompt);
   const file = `${style}/${id}.png`;
+  // Belt and braces with safeId, and the same test the GET side runs: the answer is a path under game/art or
+  // it is not an answer. Checked on the joined path, because that is the thing being written, not its parts.
+  const target = resolve(ART_DIR, style, `${id}.png`);
+  if (!target.startsWith(resolve(ART_DIR) + sep)) return { ok: false, why: `art id '${job.subject_id}' would write outside game/art` };
   try {
     const wf = JSON.parse(await readFile(ART_TEMPLATE, 'utf8'));
     const set = (nid, patch) => { if (wf[nid]) Object.assign(wf[nid].inputs, patch); };
@@ -182,7 +186,7 @@ async function generateArt(job) {
       const view = `${ART_URL}/view?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder || '')}&type=${img.type}`;
       const buf = Buffer.from(await (await fetch(view)).arrayBuffer());
       await mkdir(join(ART_DIR, style), { recursive: true });
-      await writeFile(join(ART_DIR, file), buf);
+      await writeFile(target, buf);
       // Recorded against the style that drew it, so a live render of a pre-drawn subject becomes the picture
       // for *that* style and leaves the other styles' files alone. The resolver picks per setting.
       const rec = await art.record({ id, style, kind: job.kind, subject_id: job.subject_id, file, w, h, seed, engine: 'anima', sha256: createHash('sha256').update(buf).digest('hex'), prompt, at: new Date().toISOString() });
@@ -468,11 +472,88 @@ function json(res, code, obj) {
   res.end(body);
 }
 
-async function body(req) {
+/**
+ * Request bodies, one door.
+ *
+ * Every route used to open its own `JSON.parse((await body(req))...)`, and only one of the seven bothered to
+ * catch. A truncated POST - a phone locking mid-request, a bad quote in a shell - therefore threw out of the
+ * handler and answered 500 with a JavaScript parse error, which is the shape of bug this build is supposed to
+ * be on the side of: the client did something illegal and the server blamed itself. It is also the difference
+ * between "malformed input is refused with the legal shape attached" and a law that only holds when the input
+ * happens to be well-formed. `body must be JSON` now answers every bad body on every route, in the same words.
+ *
+ * The cap is not paranoia about attacks; it is that `for await (const c of req)` with no limit will happily
+ * assemble a 2 GB body in RAM on a laptop that is also holding a 35B model, a TTS model and ComfyUI.
+ */
+const MAX_BODY = 64 * 1024;
+async function body(req, max = MAX_BODY) {
   const chunks = [];
-  for await (const c of req) chunks.push(c);
+  let size = 0;
+  let over = false;
+  // A request that dies halfway is not a server error. Without this listener an aborted POST - the phone that
+  // locked mid-tap, the browser tab closed while a room was being described - surfaces as an 'error' event on
+  // the request stream with nobody watching, which is an uncaught exception, which is the game ending for four
+  // players because somebody closed a laptop. http_test.mjs watched the process exit 143 over exactly this.
+  req.on('error', () => { req.aborted = true; });
+  for await (const c of req) {
+    size += c.length;
+    if (size > max) {
+      // Drain and discard rather than dropping the socket. The first version answered 413 and destroyed the
+      // connection, and the next POST on that same keep-alive connection hung for five minutes waiting for a
+      // response to a request nobody had finished reading - so "refused" and "broken" looked identical from the
+      // client. Someone posting 4 MB to a character-sheet endpoint made a mistake; someone posting a gigabyte
+      // is flooding, and only that gets closed, after 32 MB of refusing to buffer any more of it.
+      if (size > max * 512) { const e = new Error(`body over ${max * 512} bytes`); e.status = 507; req.destroy(); throw e; }
+      over = true;
+      continue;
+    }
+    chunks.push(c);
+  }
+  if (over) { const e = new Error(`body over ${max} bytes`); e.status = 413; throw e; }
+  if (req.aborted) { const e = new Error('client hung up mid-body'); e.status = 499; throw e; }
   return Buffer.concat(chunks);
 }
+
+/**
+ * Parse a body or answer for the caller. Returns null once a reply has been sent, so a handler reads:
+ *   const p = await readJSON(req, res); if (!p) return;
+ * A parse failure says what JSON is; an array or a bare scalar says what this server accepts, because "body
+ * must be JSON" is no help to someone who sent `[{"slot":1}]` and believes they did exactly that.
+ */
+async function readJSON(req, res) {
+  let raw;
+  try { raw = (await body(req)).toString('utf8').trim(); }
+  catch (e) {
+    if (e.status === 499) return null;                       // nobody left to tell
+    if (e.status === 413) json(res, 413, { error: `${e.message} - this is a character sheet, not a save file` });
+    else json(res, 500, { error: e.message });
+    return null;
+  }
+  if (!raw) return {};
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e) { json(res, 400, { error: `body must be JSON (${e.message}) - an object like {"slot":1}` }); return null; }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    json(res, 400, { error: 'body must be a JSON object like {"slot":1}, not an array or a bare value' });
+    return null;
+  }
+  return parsed;
+}
+
+/**
+ * Which chair, or nothing.
+ *
+ * The routes used to write `Number(p.slot)`, which is fine until someone sends `[2]`: Number() of a one-element
+ * array is 2, so an array was a legal way to sit in seat two while `"abc"` was correctly refused. Coercion that
+ * accepts JSON types nobody means is a hole with the shape of convenience - so a slot is a whole number from 1
+ * to 4, or a string that is exactly one, and everything else is answered with the range.
+ */
+function slotOf(value) {
+  if (typeof value === 'number' && Number.isInteger(value)) return value;
+  if (typeof value === 'string' && /^[1-4]$/.test(value.trim())) return Number(value.trim());
+  return null;
+}
+
 
 async function file(res, path) {
   try {
@@ -501,9 +582,12 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && path === '/api/intent') {
-      const { slot, text } = JSON.parse((await body(req)).toString('utf8') || '{}');
-      const s = Number(slot);
-      if (!g.characters[s]) return json(res, 400, { error: `slot ${slot} is not seated` });
+      const q = await readJSON(req, res);
+      if (!q) return;
+      const { text } = q;
+      const s = slotOf(q.slot);
+      if (s === null) return json(res, 400, { error: 'slot must be 1-4' });
+      if (!g.characters[s]) return json(res, 400, { error: `slot ${q.slot} is not seated` });
       const clean = String(text || '').trim().slice(0, 400);
       if (!clean) return json(res, 400, { error: 'nothing said' });
       // In-round intent, straight onto the mutable tail. setIntents() belongs to the round boundary
@@ -514,10 +598,11 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && path === '/api/round') {
-      const { n } = JSON.parse((await body(req)).toString('utf8') || '{}');
+      const q = await readJSON(req, res);
+      if (!q) return;
       // Answered immediately: a real DM turn is tens of seconds, and the client learns the outcome on SSE.
       json(res, 202, { ok: true, pending: true, mode: FAKE ? 'fake-dm' : 'live-dm' });
-      playRound(Number(n) || 1);
+      playRound(Number(q.n) || 1);
       return;
     }
 
@@ -536,8 +621,10 @@ const server = createServer(async (req, res) => {
      * screen can show which line of the sheet is wrong.
      */
     if (req.method === 'POST' && path === '/api/seat') {
-      const p = JSON.parse((await body(req)).toString('utf8') || '{}');
-      const slot = Number(p.slot);
+      const p = await readJSON(req, res);
+      if (!p) return;
+      const slot = slotOf(p.slot);
+      if (slot === null) return json(res, 400, { error: 'slot must be 1-4' });
       if (![1, 2, 3, 4].includes(slot)) return json(res, 400, { error: 'slot must be 1-4' });
       if (p.random) {
         const dealt = randomSheet(slot);
@@ -569,7 +656,8 @@ const server = createServer(async (req, res) => {
      * description, render, record, and the corridor keeps that face for the rest of the session.
      */
     if (req.method === 'POST' && path === '/api/scene') {
-      const p = JSON.parse((await body(req)).toString('utf8') || '{}');
+      const p = await readJSON(req, res);
+      if (!p) return;
       const here = g.locations[g.party_location];
       const desc = String(p.description || '').trim();
       if (desc) { here.description = desc.slice(0, 400); here.prompt_hint = String(p.prompt_hint || desc).slice(0, 400); }
@@ -585,7 +673,8 @@ const server = createServer(async (req, res) => {
 
     /** Draw one named subject now and keep it: used for the scene, and for anything else the table invents. */
     if (req.method === 'POST' && path === '/api/art/generate') {
-      const p = JSON.parse((await body(req)).toString('utf8') || '{}');
+      const p = await readJSON(req, res);
+      if (!p) return;
       const kind = String(p.kind || 'environment');
       const subject_id = String(p.subject_id || g.party_location);
       const done = await generateArt({ kind, subject_id, prompt_hint: String(p.prompt_hint || ''), size: p.size || [1024, 576], steps: p.steps || 6 });
@@ -602,7 +691,8 @@ const server = createServer(async (req, res) => {
      * engine because this happens while four people are waiting to start.
      */
     if (req.method === 'POST' && path === '/api/portrait') {
-      const p = JSON.parse((await body(req)).toString('utf8') || '{}');
+      const p = await readJSON(req, res);
+      if (!p) return;
       const description = String(p.description || '').trim().slice(0, 400);
       if (description.length < 8) return json(res, 400, { error: 'describe them in a sentence first - "a guy" is not enough to paint' });
       const id = `face_${createHash('sha256').update(description.toLowerCase()).digest('hex').slice(0, 12)}`;
@@ -650,7 +740,8 @@ const server = createServer(async (req, res) => {
     if (path === '/api/settings' && req.method === 'POST') {
       // body() hands back a Buffer (line 290 parses the same way); treating it as an object is how the
       // first version of this handler answered a perfectly good POST with a 400.
-      let b; try { b = JSON.parse((await body(req)).toString('utf8') || '{}'); } catch { return json(res, 400, { error: 'body must be JSON' }); }
+      const b = await readJSON(req, res);
+      if (!b) return;
       // A missing or non-string style is a broken request, not a request to go back to the default. The
       // first version of this fell through resolveStyle's graceful fallback and happily persisted one, so a
       // malformed POST (a truncated body, a bad quote in a shell) silently restyled the game and wrote it to

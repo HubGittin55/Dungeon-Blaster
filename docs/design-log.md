@@ -111,3 +111,35 @@ Rewriting `generateArt` with a span-anchored replace deleted three functions tha
 passed - nothing but a live round caught it, and it caught it as `ReferenceError: speak is not defined` in a
 crashed server. The fix procedure worth keeping: diff the *set of top-level names* against HEAD and print what
 vanished. 40 seconds, and it names every casualty instead of the one you happened to click.
+
+## 2026-11-10 - three things the first four-player game with the real DM caught
+
+Played alpha-2026-11-092348 with four seats, the live 35B, and nothing scripted. Rounds took 32-51s, three of
+them committed on the first try (`strict`, narration verified), and the table invented a club, a torch, a hook
+on a rope, a merchant named Glim, and a Guard Harker - every one of them painted by Anima and looking at the
+couch from the CARDS pile within four seconds. Three defects came out of it, and none of them were visible to
+any test I already had.
+
+**A rejection that names no legal value is not a correction.** The model cited another seat's intent for a
+craft, was told *"must cite an intent issued by slot 4 this round"*, and had four ids on screen with no way to
+tell which were slot 4's - so it made the same mistake twice, the round went to the canned bark, and a player
+watched their torch become nothing. `NO_INTENT` now says whose id was misused and hands back the ids that seat
+actually issued (`allowed` was empty before, which is the part I keep getting wrong: the law's whole promise is
+that a refusal teaches).
+
+**A person is a mutation.** One round narrated *"the voice from the niche belongs to a trapped merchant"* and
+issued nothing. The prose law - do not describe what your mutations do not create - was not violated in spirit
+anywhere near as badly as it should have been, because nothing in the contract said a human being has to be
+*registered*. Glim and Guard Harker exist because the model used `introduce_npc`, which means they can be met
+again, fought, paid, and painted; a stranger in the adjectives can be none of those. Contract line plus a test
+that the line and the schema enum both still exist.
+
+**The telling was an event, not a fact.** Reload the page mid-adventure and the story went back to *"Four of
+you wake up in a damp cell"* while the header cheerfully said round 1 and the party stood in the Guard corridor.
+Narration that has been heard is state: `telling = {round, text, bark}` now rides in `/api/state`, arrives with
+a rejoin, and is painted as plain text (the words came out of a language model, so they do not get to be HTML).
+The typewriter stays for narration as it lands - a reload should not re-perform twenty seconds of old news.
+
+Also fixed in the same sweep, both invisible until a human looked: `introduce_npc` rendered portraits into the
+manifest that no screen ever asked for (NPCs are cards now, faces and all), and *New table* still logged "four
+seats filled" after the seats stopped filling themselves.

@@ -115,6 +115,13 @@ export function contractNote(extra) {
     + 'tracker refuses anything they are not holding, and you get one retry. You may not propose stats, '
     + 'tiers, prices, or contention winners; the tracker computes those from what you pay.',
     'Keep narration to two or three spoken sentences. Do not describe anything your mutations do not create.',
+    // A live round narrated "the voice from the niche belongs to a trapped merchant" and issued no mutation for
+    // her. The prose was fine and the world was not: she cannot be found, bought from, or fought next round,
+    // and the engine cannot paint a face for somebody it has never heard of. People are state, so people are
+    // mutations.
+    'A person is a mutation. Anyone who speaks, is named, or is dealt with in your narration must be introduced '
+    + 'with introduce_npc in the same round, as its own mutation. A stranger who exists only in the prose is '
+    + 'not in the world: she cannot be met again, and the table cannot see her.',
     'Address every intent in the table, in order, so nobody at the couch is silently dropped: one short '
     + 'clause per player who spoke. Four people asked for four things - answering one of them is not a '
     + 'round, it is three people watching someone else play.',

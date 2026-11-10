@@ -179,8 +179,10 @@ function log(msg, cls) {
 // frame is a page, not a story. It never reorders anything: the sentence you see is the sentence that
 // was committed, and a bark means the gate refused to state a fact it had not verified.
 let typer = null;
+let toldText = null;
 function tell(text, isBark) {
   clearInterval(typer);
+  toldText = String(text || '');
   say.className = isBark ? 'typing bark' : 'typing';
   say.textContent = '';
   const words = String(text || '').split(/(\s+)/);
@@ -240,6 +242,9 @@ let deckSig = '';
 function deck(s) {
   const bits = [];
   if (s.place && s.place.art) bits.push([s.place.name, s.place.art.url]);
+  // People are cards too. An NPC who has just been invented has no face yet - the render lands a few seconds
+  // later and the state re-emits - so she appears in the pile the moment there is something honest to show.
+  for (const n of s.npcs || []) if (n.art) bits.push([n.role ? `${n.name} \u2014 ${n.role}` : n.name, n.art]);
   for (const [m, url] of Object.entries(s.cards || {})) if (url) bits.push([`${m} \u00d7`, url]);
   for (const p of s.slots || []) for (const it of (p.carrying || [])) if (it.own && it.art) bits.push([it.name, it.art]);
   const sig = bits.map((b) => b[1]).join('|');
@@ -280,6 +285,15 @@ function draw(s) {
   $('place').textContent = s.place ? s.place.name : '…';
   $('round').textContent = `round ${s.round}`;
   mode(s.mode);
+  // A reload has to show where the story actually is. The typewriter is for narration as it lands; a telling
+  // that arrives inside state is news the table already heard, so it is painted whole and at once. Plain text,
+  // because the words in it came out of a language model.
+  if (s.telling && s.telling.text !== toldText) {
+    toldText = String(s.telling.text);
+    clearInterval(typer);
+    say.className = s.telling.bark ? 'bark' : '';
+    say.textContent = s.telling.text;
+  }
   room(s.place);
   deck(s);
   const box = $('slots');

@@ -306,7 +306,23 @@ function checkMutation(ctx, m) {
     if (![1, 2, 3, 4].includes(actor)) return reject(m, 'SLOT_UNKNOWN', `${m.tool} needs an actor slot 1-4`);
     if (!g.characters[actor]) return reject(m, 'SLOT_UNKNOWN', `slot ${actor} has no character, so it owes no intent and can spend nothing`);
     const intent = g.intents.find((i) => i.id === m.intent && i.slot === actor);
-    if (!intent) return reject(m, 'NO_INTENT', `${m.tool} must cite an intent issued by slot ${actor} this round`);
+    if (!intent) {
+      // Name the legal values, including when the citation exists but belongs to somebody else: a live model
+      // cited another seat's intent twice in a row against this message, burned two 25-second attempts, and
+      // the round went to the canned bark. "must cite an intent issued by slot 4" is not a correction when
+      // the caller can see four ids and has no way to know which ones are slot 4's.
+      const mine = g.intents.filter((i) => i.slot === actor).map((i) => i.id);
+      const stolen = g.intents.find((i) => i.id === m.intent);
+      const why = stolen
+        ? `'${stolen.id}' was issued by slot ${stolen.slot}, not slot ${actor}`
+        : m.intent === undefined || m.intent === null ? `no intent was cited` : `'${m.intent}' was not issued this round`;
+      return reject(
+        m, 'NO_INTENT',
+        `${m.tool} must cite an intent issued by slot ${actor} this round (${why})`
+        + (mine.length ? `: cite one of ${mine.join(', ')}` : `: slot ${actor} issued nothing, so nothing may be done to it`),
+        mine,
+      );
+    }
   }
 
   switch (m.tool) {

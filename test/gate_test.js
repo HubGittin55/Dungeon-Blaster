@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { loadRules } from '../tracker/rules_doc.js';
 import { newGame, joinSlot, addMaterials, setIntents, resolveRound, rulesForCall, computeItemStats, mutationHash, takeSeat, validateSheet, characterLaw } from '../tracker/engine.js';
+import { contractNote } from '../game/gm.mjs';
 
 const rules = loadRules(new URL('../rules/rules.md', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'));
 let pass = 0, fail = 0;
@@ -345,6 +346,46 @@ t("the item types the contract names are the engine's, spelled the engine's way"
     assert(new RegExp(`\\b${name}\\b`).test(schema), `contract never mentions '${name}', so the model cannot use it`);
   }
   assert(!/armour/.test(schema), "the contract taught the model 'armour'; the engine accepts 'armor'");
+});
+
+t("a miscited intent is refused with the ids that seat could actually have cited", () => {
+  // Real round, real model, attempt 2 of 2. It cited another player's intent id for slot 4's craft and was
+  // told: "craft_item must cite an intent issued by slot 4 this round". There were four ids on screen and no
+  // way to tell which belonged to slot 4, so it cited the wrong one again, the gate rejected the round twice,
+  // and a player watched their torch turn into "Something happens." The refusal was correct and useless.
+  const g = fresh();
+  setIntents(g, intents([1, 'look around'], [4, 'craft a torch from cloth and wood']));
+  const out = resolveRound(g, {
+    narration: 'testing',
+    mutations: [craft('m1', 4, 'i1', C('Cloth torch', 'tool', [{ name: 'cloth', qty: 1 }]))],
+  });
+  const r = out.rejected.find((x) => x.code === 'NO_INTENT');
+  assert(r, 'a craft citing another seat\'s intent must be refused');
+  assert(/slot 1/.test(r.reason), `must say whose id was misused, got: ${r.reason}`);
+  assert(/\bi4\b/.test(r.reason), `must name the id slot 4 could cite, got: ${r.reason}`);
+  assert.deepEqual(r.allowed, ['i4'], 'must hand back the ids that seat issued');
+
+  // A seat that said nothing owes nothing, and the refusal has to say that instead of offering an empty list.
+  setIntents(g, intents([1, 'look around']));
+  const silent = resolveRound(g, {
+    narration: 'testing',
+    mutations: [craft('m2', 3, 'i3', C('Cloth torch', 'tool', [{ name: 'cloth', qty: 1 }]))],
+  });
+  const q = silent.rejected.find((x) => x.code === 'NO_INTENT');
+  assert(q && /issued nothing/.test(q.reason), `silent seat needs a refusal that says so: ${q && q.reason}`);
+});
+
+t("the contract makes a person a mutation, not a figure of speech", () => {
+  // Real round against the live model: "the voice from the niche belongs to a trapped merchant, whose shout is
+  // cut short as the bricks yield". Beautiful. Completely unregistered - no introduce_npc, so she cannot be
+  // met again, cannot be paid, cannot be fought, and the face the table wanted was never queued for painting.
+  // The narration law stops the model claiming things that are not true; it never said a person must be true.
+  const note = contractNote('');
+  assert(/introduce_npc/.test(note), 'the DM contract no longer tells the model to register people it speaks for');
+  assert(/person is a mutation/i.test(note), `and no longer says it in terms the model can act on: ${note.slice(0, 80)}`);
+  // Asking for a tool the call cannot name is worse than silence: the schema enum is the authority.
+  const schema = readFileSync(new URL('../game/schema/resolve_round.schema.json', import.meta.url), 'utf8');
+  assert(/"introduce_npc"/.test(schema), 'introduce_npc is not in the schema tool enum, so the rule cannot be obeyed');
 });
 
 // ----------------------------------------------------------------- character sheets

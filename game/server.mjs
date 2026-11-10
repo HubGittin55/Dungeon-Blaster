@@ -31,6 +31,12 @@ import { readFile as readText, writeFile as writeText } from 'node:fs/promises';
 const PORT = Number(process.env.DB_GAME_PORT || 8765);
 const HOST = '127.0.0.1';
 const FAKE = process.argv.includes('--fake-dm');
+
+// The last thing the table was told. This used to exist only as a pushed event, so refreshing a screen rewrote
+// the story back to the opening line, and a round's narration - once heard - was gone from the world. The
+// telling is state now: it belongs to a round, and it survives a reload, a fifth phone, and a rejoin.
+const OPENING_TELLING = 'Four of you wake up in a damp cell with a door and a rumour of stairs. Say what you do, then press Play round.';
+let telling = { round: 0, text: OPENING_TELLING, bark: false };
 const TTS_URL = process.env.DB_TTS_URL || '';
 const ASR_URL = process.env.DB_ASR_URL || 'http://127.0.0.1:8081';
 const TTS_VOICE = process.env.DB_TTS_VOICE || 'af';
@@ -361,11 +367,20 @@ function publicState() {
     place: { ...here, art: art.resolve(sceneJob(here), { style: artStyle }) },
     law: characterLaw(g),
     seats_open: [1, 2, 3, 4].filter((s) => !g.characters[s]),
+    // Everyone the DM has introduced, with the face the table painted for them. introduce_npc used to be a
+    // mutation whose only visible consequence was a line of prose: the engine knew the ferrywoman existed, and
+    // the gate had already checked she wasn't a duplicate, but the couch could not see her - and her portrait
+    // was being rendered into a manifest nobody asked about.
+    npcs: Object.values(g.npcs).map((n) => {
+      const face = art.resolve({ kind: 'character', subject_id: n.id }, { style: artStyle });
+      return { id: n.id, name: n.name, role: n.role || null, art: face ? face.url : null };
+    }),
     cards: Object.fromEntries(inPlay.map((m) => [m, cardUrl(m)])),
     // Faces for the classes on offer, so the creation screen can show who you would be playing rather than
     // making the choice from three words of flavour text.
     class_faces: Object.fromEntries(characterLaw(g).classes.map((c) => [c.name, (art.resolve(faceJob(c.name), { style: artStyle }) || {}).url || null])),
     mode: FAKE ? 'fake-dm' : 'live-dm',
+    telling,
     slots: [1, 2, 3, 4].map((s) => {
       const c = g.characters[s];
       if (!c) return { slot: s, seated: false };
@@ -417,6 +432,7 @@ async function playRound(count = 1) {
     const narration = log.narration || null;
     const bark = barkFor(log);
     const spoken = narration || bark;
+    telling = { round: g.round, text: spoken, bark: !narration };
 
     // Narration first, then the pictures: the sentence is what the players are waiting on, and a render
     // in front of it is a hole in the audio. So the renders are not awaited - the round payload reports what
@@ -623,8 +639,9 @@ const server = createServer(async (req, res) => {
 
     if (req.method === 'POST' && path === '/api/new') {
       g = freshTable();
+      telling = { round: 0, text: OPENING_TELLING, bark: false };
       emit('state', publicState());
-      emit('log', { msg: 'new table, four seats filled' });
+      emit('log', { msg: 'new table, four empty seats waiting to be declared' });
       return json(res, 200, publicState());
     }
 

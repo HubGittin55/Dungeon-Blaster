@@ -61,6 +61,75 @@ const tierOf = (rules, name) => {
 };
 const tierRow = (rules, tier) => get(rules, 'rule.tier.table').data.tiers.find((t) => t.tier === tier);
 
+// Every number the tracker spends is a whole count of a thing, per rules line 52, "No negative
+// numbers". Absent means one; anything else is not a quantity. This is not pedantry: while qty was
+// read as `Number.isInteger(a.qty) ? a.qty : 1`, `drop qty=-1` ADDED material to the dropper, `take
+// qty=-1` conjured loot in the room, and `transfer qty=-1` inflated the sender's stack while emptying
+// the receiver's. A negative quantity is not a direction, it is a hole with an argument.
+const qtyOf = (v) => (v === undefined || v === null || v === '' ? 1 : (Number.isInteger(v) && v >= 1 ? v : null));
+const QTY_ALLOWED = ['qty: a whole number, 1 or more'];
+
+// Within-round balances. The gate validates every mutation against the state at the top of the round
+// and then commits the lot, so any pool two mutations draw on has to be counted here or each is legal
+// on its own and the pair overdraws: two crafts of 2 wood against 3 in the bag used to end the round
+// at wood = -1, and two drops of the same club crashed the commit on the second one. Anything the
+// tracker spends is drawn through this ledger, so the second caller sees the first caller's draw.
+// A mutation reserves only once every one of its draws fits, or a craft that is refused for want of
+// sinew would have quietly spent the party's wood in a round that commits nothing.
+function drawFrom(ctx, draws) {
+  const left = new Map();
+  for (const d of draws) {
+    const have = ctx.pool.has(d.key) ? ctx.pool.get(d.key) : d.have;
+    const got = left.has(d.key) ? left.get(d.key) : have;
+    if (d.need > got) return { ok: false, key: d.key, need: d.need, have };
+    left.set(d.key, got - d.need);
+  }
+  for (const [k, v] of left) ctx.pool.set(k, v);
+  return { ok: true };
+}
+
+// What an impossible world looks like. This is the backstop, not the law: quantities are checked
+// before they are spent, but a pool somebody forgets to count should cost a round, not a run - and in
+// a game that is only ever heard, a corrupted number is a corruption the table cannot see. Exported so
+// the fuzz test can assert that no soup of mutations ever leaves the state in one of these states.
+export function stateInvariants(g) {
+  const bad = [];
+  for (const ch of Object.values(g.characters || {})) {
+    for (const [n, q] of Object.entries(ch.materials || {})) {
+      if (!Number.isInteger(q) || q < 0) bad.push(`slot ${ch.slot} holds ${q} ${n}`);
+    }
+    for (const [id, q] of Object.entries(ch.inventory || {})) {
+      if (!Number.isInteger(q) || q < 1) bad.push(`slot ${ch.slot} holds ${q} of item ${id}`);
+      if (!g.items || !g.items[id]) bad.push(`slot ${ch.slot} holds unknown item ${id}`);
+    }
+  }
+  for (const [loc, place] of Object.entries(g.locations || {})) {
+    for (const l of place.loot || []) if (!Number.isInteger(l.qty) || l.qty < 1) bad.push(`${loc} has a stack of ${l.qty} ${l.name}`);
+  }
+  // An item has exactly one holder, and its owner agrees with who is holding it. Handing a club to slot
+  // 2 while slot 1 still carries five of it is the duplication every quantity check exists to prevent.
+  for (const [id, it] of Object.entries(g.items || {})) {
+    const holders = Object.values(g.characters || {}).filter((c) => (c.inventory || {})[id] > 0).map((c) => c.slot);
+    if (holders.length > 1) bad.push(`item ${id} is carried by ${holders.join(' and ')}`);
+    if (it.owner == null && holders.length) bad.push(`item ${id} was dropped and is still carried by ${holders.join(' and ')}`);
+    if (Number.isInteger(it.owner) && [1, 2, 3, 4].includes(it.owner) && !holders.includes(it.owner)) {
+      bad.push(`item ${id} names owner ${it.owner}, who is not carrying it`);
+    }
+  }
+  return bad;
+}
+
+// Commit-time snapshot for that backstop. structuredClone because the state carries Sets and Maps
+// (confirms, intents) which JSON would flatten into objects; `rules` is shared, so it is not copied.
+function snapshot(g) {
+  const snap = {};
+  for (const [k, v] of Object.entries(g)) snap[k] = k === 'rules' ? v : structuredClone(v);
+  return snap;
+}
+function restore(g, snap) {
+  for (const k of Object.keys(snap)) if (k !== 'rules') g[k] = snap[k];
+}
+
 export function joinSlot(g, slot, { name, class_label = 'wanderer', attributes = null } = {}) {
   if (![1, 2, 3, 4].includes(slot)) throw new Error(`slot must be 1-4, got ${slot}`);
   const nameCheck = validateName(g, name, 'npc_name');
@@ -138,6 +207,13 @@ export function takeSeat(g, slot, { name, cls, attributes }) {
   }
   const v = validateSheet(g, { cls, attributes });
   if (!v.ok) return v;
+  // A name that fails the naming rule is a rejection with the rule attached, not an exception. Throwing
+  // meant POST /api/seat answered 500 to "x" as a name, and a 500 is the server admitting it was
+  // surprised by something a player typed.
+  const nameCheck = validateName(g, name, 'npc_name');
+  if (!nameCheck.ok) {
+    return { ok: false, rejected: [reject(null, 'NAME_REJECTED', `character name rejected: ${nameCheck.reason}`, nameCheck.allowed)] };
+  }
   // An existing character is kept byte-for-byte until the new sheet is proven, because the cap check below
   // can still fail - and "your application was declined" must not be the message that arrives by deleting
   // the character you were already playing.
@@ -210,6 +286,7 @@ export function resolveRound(g, call, { mode = 'strict', rules_refs = [] } = {})
     diffs: [],
     art_jobs: [],
     claims: new Map(), // "loc:loot:idx" -> mutation id, first valid claim wins by seed order
+    pool: new Map(), // within-round balance ledger: what two mutations could otherwise both spend
     seenCraft: new Map(), // "slot|name|type" -> mutation id, for REJECT_DUPLICATE
   };
   if (!call || typeof call !== 'object' || !Array.isArray(call.mutations) || typeof call.narration !== 'string') {
@@ -225,9 +302,24 @@ export function resolveRound(g, call, { mode = 'strict', rules_refs = [] } = {})
   }
 
   let committed = [];
-  const clean = ctx.rejected.length === 0;
+  let clean = ctx.rejected.length === 0;
   if (clean || mode === 'fallback') {
+    // Snapshot, commit, then ask whether the world is still possible. If it is not, the state goes back
+    // and the round is refused: the table hears a tracker that said no, not a number that stays wrong
+    // for the rest of the run. This is the backstop for a pool this file forgot to count, not a
+    // substitute for counting it - every check above should make this unreachable.
+    const before = snapshot(g);
     committed = commitAll(ctx);
+    const impossible = stateInvariants(g);
+    if (impossible.length) {
+      restore(g, before);
+      committed = [];
+      ctx.accepted = [];
+      ctx.art_jobs = [];
+      ctx.diffs = [];
+      clean = false; // an ok:true round that committed nothing is the exact lie this whole file exists to stop
+      ctx.rejected.push(reject(null, 'COMMIT_INVALID', `committing that would leave the world impossible: ${impossible.join('; ')}`));
+    }
   }
 
   const turn_log = {
@@ -415,6 +507,18 @@ function checkCraft(ctx, m) {
   }
   ctx.seenCraft.set(dkey, m.id);
 
+  // Last check, because it reserves: the material pool is counted across the round, so a second craft
+  // that would leave the bag short is refused here rather than committed and found out later.
+  const need = new Map();
+  for (const mm of mats) need.set(mm.name, (need.get(mm.name) || 0) + mm.qty);
+  const fit = drawFrom(ctx, [...need].map(([name, want]) => ({
+    key: `mat:${m.actor}:${name}`, need: want, have: ch.materials[name] || 0,
+  })));
+  if (!fit.ok) {
+    const name = fit.key.split(':')[2];
+    return reject(m, 'MISSING_MATERIAL', `slot ${m.actor} has ${fit.have} ${name} left once this round's other spends are counted, and ${fit.need} is wanted`, [`${name}:${fit.have}`]);
+  }
+
   ctx.accepted_detail ||= new Map();
   (ctx.accepted_detail.set(m.id, { derived, type, name: nameCheck.name, owner: a.owner_slot ?? m.actor, mats }));
   return null;
@@ -448,7 +552,8 @@ function checkTake(ctx, m) {
   const g = ctx.g;
   const a = m.args || {};
   const loc = g.locations[g.party_location];
-  const qty = Number.isInteger(a.qty) ? a.qty : 1;
+  const qty = qtyOf(a.qty);
+  if (qty === null) return reject(m, 'BAD_ARGS', 'qty must be a whole number of at least 1 - taking -1 iron is how you plant iron', QTY_ALLOWED);
   const isMat = !!tierOf(g, a.name);
   const idx = loc.loot.findIndex((l) => l.kind === (isMat ? 'material' : 'item') && l.name === a.name);
   if (idx < 0) return reject(m, 'BAD_ARGS', `nothing called ${JSON.stringify(a.name)} is here to take`, loc.loot.map((l) => `${l.name}:${l.qty}`));
@@ -486,14 +591,26 @@ function checkDrop(ctx, m) {
   const g = ctx.g;
   const ch = g.characters[m.actor];
   const a = m.args || {};
-  const qty = Number.isInteger(a.qty) ? a.qty : 1;
-  if (tierOf(g, a.name)) {
+  const qty = qtyOf(a.qty);
+  if (qty === null) return reject(m, 'BAD_ARGS', 'qty must be a whole number of at least 1 - dropping -1 wood puts wood in your pocket', QTY_ALLOWED);
+  const isMat = !!tierOf(g, a.name);
+  let itemId = null;
+  if (isMat) {
     if ((ch.materials[a.name] || 0) < qty) return reject(m, 'MISSING_MATERIAL', `slot ${m.actor} holds ${(ch.materials[a.name] || 0)} ${a.name}`, [`${a.name}:${ch.materials[a.name] || 0}`]);
   } else {
-    const id = findHeld(g, ch, a.name);
-    if (!id) return reject(m, 'BAD_ARGS', `slot ${m.actor} is not carrying ${JSON.stringify(a.name)}`, heldNames(g, ch));
+    itemId = findHeld(g, ch, a.name);
+    if (!itemId) return reject(m, 'BAD_ARGS', `slot ${m.actor} is not carrying ${JSON.stringify(a.name)}`, heldNames(g, ch));
+    // Dropping more than you hold used to delete the item from existence: the stack went negative, got
+    // pruned, and the item lost its owner without ever reaching the room's loot.
+    if (ch.inventory[itemId] < qty) return reject(m, 'BAD_ARGS', `slot ${m.actor} holds ${ch.inventory[itemId]} ${a.name}, not ${qty}`, [`qty:1..${ch.inventory[itemId]}`]);
   }
-  (ctx.accepted_detail ||= new Map()).set(m.id, { qty, isMat: !!tierOf(g, a.name) });
+  const fit = drawFrom(ctx, [{
+    key: isMat ? `mat:${m.actor}:${a.name}` : `inv:${m.actor}:${itemId}`,
+    need: qty,
+    have: isMat ? (ch.materials[a.name] || 0) : ch.inventory[itemId],
+  }]);
+  if (!fit.ok) return reject(m, 'MISSING_MATERIAL', `only ${fit.have} left here once this round's other drops are counted`);
+  (ctx.accepted_detail ||= new Map()).set(m.id, { qty, isMat, itemId });
   return null;
 }
 function commitDrop(ctx, m) {
@@ -507,7 +624,10 @@ function commitDrop(ctx, m) {
     if (l) l.qty += d.qty; else loc.loot.push({ kind: 'material', name: m.args.name, qty: d.qty });
     ctx.diffs.push(`ch_s${m.actor}.materials.${m.args.name}:-${d.qty}`);
   } else {
-    const id = findHeld(g, ch, m.args.name);
+    // The item id the gate checked, not a fresh lookup: by commit time an earlier drop in the same round
+    // may have emptied the stack, and looking it up again used to return undefined and then try to set
+    // `.owner` on nothing. The engine throwing mid-commit is the one failure a table cannot recover from.
+    const id = d.itemId;
     ch.inventory[id] -= d.qty;
     if (ch.inventory[id] <= 0) delete ch.inventory[id];
     g.items[id].owner = null;
@@ -528,20 +648,38 @@ function checkTransfer(ctx, m) {
   if (!recvIntent) return reject(m, 'NO_INTENT', `receiving slot ${to} issued no intent this round`);
   if (!g.confirms.has(`${m.actor}:${to}`)) return reject(m, 'BAD_ARGS', `slot ${to} has not pressed confirm for this transfer`);
   const ch = g.characters[m.actor];
-  const qty = Number.isInteger(a.qty) ? a.qty : 1;
-  if (tierOf(g, a.name)) {
+  const qty = qtyOf(a.qty);
+  if (qty === null) return reject(m, 'BAD_ARGS', 'qty must be a whole number of at least 1 - a transfer of -1 wood is a duplication, not a direction', QTY_ALLOWED);
+  const isMat = !!tierOf(g, a.name);
+  let itemId = null;
+  if (isMat) {
     if ((ch.materials[a.name] || 0) < qty) return reject(m, 'MISSING_MATERIAL', `slot ${m.actor} holds ${(ch.materials[a.name] || 0)} ${a.name}`);
   } else {
-    const id = findHeld(g, ch, a.name);
-    if (!id) return reject(m, 'BAD_ARGS', `slot ${m.actor} is not carrying ${JSON.stringify(a.name)}`, heldNames(g, ch));
+    itemId = findHeld(g, ch, a.name);
+    if (!itemId) return reject(m, 'BAD_ARGS', `slot ${m.actor} is not carrying ${JSON.stringify(a.name)}`, heldNames(g, ch));
+    // A unique item changed hands in fives: handing across a club held once, `qty 5`, moved five of it
+    // and left the giver holding zero of an item that had one of anything.
+    if (ch.inventory[itemId] < qty) return reject(m, 'BAD_ARGS', `slot ${m.actor} holds ${ch.inventory[itemId]} ${a.name}, not ${qty}`, [`qty:1..${ch.inventory[itemId]}`]);
   }
-  g.confirms.delete(`${m.actor}:${to}`);
-  (ctx.accepted_detail ||= new Map()).set(m.id, { qty, to, isMat: !!tierOf(g, a.name) });
+  const key = `${m.actor}:${to}`;
+  if (!g.confirms.has(key)) return reject(m, 'BAD_ARGS', `slot ${to} has not pressed confirm for this transfer`);
+  const fit = drawFrom(ctx, [{
+    key: isMat ? `mat:${m.actor}:${a.name}` : `inv:${m.actor}:${itemId}`,
+    need: qty,
+    have: isMat ? (ch.materials[a.name] || 0) : ch.inventory[itemId],
+  }]);
+  if (!fit.ok) return reject(m, 'MISSING_MATERIAL', `slot ${m.actor} has ${fit.have} left to give once this round's other gifts are counted`);
+  // The press is spent at commit, not in this check. A transfer refused three lines above was never a
+  // handoff anybody agreed to, and making a partner press again for the tracker's own decision is a tax
+  // on a round that committed nothing. (Doors and closures run the other way by rule - see the
+  // disarm/unwedge/relight checks, where a rejected attempt spends the press on purpose.)
+  (ctx.accepted_detail ||= new Map()).set(m.id, { qty, to, isMat, itemId, confirmKey: key });
   return null;
 }
 function commitTransfer(ctx, m) {
   const g = ctx.g;
   const d = ctx.accepted_detail.get(m.id);
+  if (d.confirmKey) g.confirms.delete(d.confirmKey);
   const from = g.characters[m.actor], to = g.characters[d.to];
   if (d.isMat) {
     from.materials[m.args.name] -= d.qty;
@@ -549,7 +687,7 @@ function commitTransfer(ctx, m) {
     ctx.diffs.push(`ch_s${m.actor}.materials.${m.args.name}:-${d.qty}`);
     ctx.diffs.push(`ch_s${d.to}.materials.${m.args.name}:+${d.qty}`);
   } else {
-    const id = findHeld(g, from, m.args.name);
+    const id = d.itemId; // the id the gate checked, for the same reason commitDrop does
     from.inventory[id] -= d.qty;
     if (from.inventory[id] <= 0) delete from.inventory[id];
     to.inventory[id] = (to.inventory[id] || 0) + d.qty;
@@ -722,11 +860,48 @@ export function validateName(g, name, kind = 'item_name') {
   if (raw.length > spec.max_chars) return { ok: false, reason: `too long (${raw.length} > ${spec.max_chars})`, allowed };
   if (raw.split(/\s+/).length > spec.max_words) return { ok: false, reason: `too many words (max ${spec.max_words})`, allowed };
   if (spec.disallow && spec.disallow.some((c) => raw.includes(c))) return { ok: false, reason: 'contains a disallowed character', allowed };
-  const low = raw.toLowerCase();
+  // Control characters break the fence for every kind of name, whether or not a charset is declared:
+  // names ride in the prompt inside <name>...</name> on a line-oriented template, so a \n in a proper
+  // noun is the end of the fence and the start of the noun's sentences. narration sanitises its
+  // newlines for exactly this reason and names did not.
+  /* eslint-disable no-control-regex */
+  if (/[\u0000-\u001f\u007f]/.test(name || '')) return { ok: false, reason: 'names contain no newlines or control characters', allowed };
+  /* eslint-enable no-control-regex */
+  // rule.naming spells the item charset out in words and this function was not reading it, so
+  // "Blade! @%" and "Blade/with/slashes" were legal item names while character names were fenced. A
+  // charset nobody parses is decoration, and names are the one thing every table writes: they land in
+  // asset ids, manifest keys, the CARDS pile and the prompt.
+  const re = charsetRe(spec);
+  if (re) {
+    const offender = raw.match(re);
+    if (offender) return { ok: false, reason: `uses ${JSON.stringify(offender[0])}, outside the allowed set (${spec.charset})`, allowed };
+  }  const low = raw.toLowerCase();
   const reserved = get(g, 'rule.naming').data.reserved_substrings;
   const hit = reserved.find((r) => low.includes(r));
   if (hit) return { ok: false, reason: `reserved word ${JSON.stringify(hit)}: names are data, not instructions`, allowed };
   return { ok: true, name: raw };
+}
+
+// The rules describe a charset in words rather than a regex, so the words are the interface. A token
+// the engine does not implement is an error, not a free pass: silently permitting an unknown token is
+// how a charset rule quietly becomes the kind of rule that only applies to what somebody tried.
+const CHARSET_TOKENS = { letters: '\\p{L}', digits: '\\p{N}', space: ' ', hyphen: '\\-', apostrophe: "'", period: '\\.' };
+function charsetRe(spec) {
+  if (!spec.charset) return null;
+  const tokens = String(spec.charset).split(/\s+/).filter(Boolean);
+  const unknown = tokens.filter((t) => !(t in CHARSET_TOKENS));
+  if (unknown.length) throw new Error(`rule.naming charset names tokens the engine does not implement: ${unknown.join(', ')}`);
+  // The regex finds a character that is NOT in the allowed set, so it answers the question the rule
+  // actually asks - "does this name use a character outside the set?" - and names the offender, without
+  // anchoring anything.
+  // Concatenation, and each token escaped for a character class: with the `u` flag a bare `-` mid-class
+  // is a syntax error, `.` inside a class is literal, and the rules list their tokens in their own order
+  // so nothing here can assume which ones arrive. (The first version of this line was a template literal
+  // and failed to parse; it blamed the parser in a comment, and the parser was innocent - the escaping of
+  // \p{L} was wrong. That is the whole reason the comment is gone: a wrong explanation in a file that
+  // fences names is worse than no explanation.)
+  const body = tokens.map((t) => CHARSET_TOKENS[t]).join('');
+  return new RegExp('[^' + body + ']', 'u');
 }
 
 function findHeld(g, ch, name) {

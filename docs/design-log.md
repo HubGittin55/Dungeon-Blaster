@@ -179,3 +179,73 @@ what it may not carry is where a tier came from. 144 assertions now, 16 of them 
 
 Written up as `docs/redteam-brief.md`: what to attack, in the order I found things, what is already probed, and
 - crucially for anyone else's evening - the seventeen behaviours that are laws and look like bugs.
+
+## 2026-11-10 - the review came back, and every finding was the same finding
+
+Stunkus pulled `d73ba44`, wrote six probe scripts, and dropped them in `test/redteam/`. Four of the five
+findings were real, they were worse than anything I had found myself, and all four were one mistake:
+
+**A round is the unit of the fiction, and the server never said so out loud.**
+
+The gate validates every mutation in a round against the state at the top of the round, then commits them
+all together. That is the design, and it is right - but it means anything two mutations can spend has to
+be counted *across* the round, and only one thing was: the loot `claims` map, hand-built for contention.
+So `craft 2 wood` twice against 3 wood in the bag validated twice and committed twice, ending the round at
+`wood = -1`. Two drops of the same club passed validation twice, and the second commit looked the item up
+again after the first had deleted the stack, found `undefined`, and threw `Cannot set properties of
+undefined` from inside the commit - over HTTP that is a 500 and a table in a state nobody can name.
+
+**And `qty` was read as `Number.isInteger(a.qty) ? a.qty : 1`, in three places.** One line, repeated, and
+it accepted every negative number in JSON. `take qty=-1` conjured loot in the room (stack 2 -> 3) and gave
+the taker -1 iron. `drop qty=-1` put wood in your pocket (2 -> 3). `transfer qty=-1` inflated the sender
+and emptied the receiver. `transfer qty=5` handed over five copies of a club that existed once, because
+nobody ever asked how many were held. Rules line 52 is four words long: "No negative numbers."
+
+The fix is a within-round ledger (`ctx.pool`) that every spend draws through, and it reserves only once a
+mutation's whole draw fits, so a craft refused for want of sinew has not quietly spent the party's wood in
+a round that commits nothing. Plus a backstop that assumes I forgot one: snapshot, commit, ask
+`stateInvariants()` whether the world is still possible - no negative stacks, no zero stacks, no unknown
+items, one holder per item, ownership agreeing with who holds it - and if it is not possible, put the
+state back and refuse the round with `COMMIT_INVALID`. A law somebody forgets should cost a round, not a
+run.
+
+**The HTTP half was the same sentence.** A real game master turn takes tens of seconds and there is one
+table. Two `POST /api/round` both got 202 and both resolved: wood spent twice, one club, and one of the
+two rounds silently degraded to a fallback bark over the top. A `/api/new` in the middle left the fresh
+table wearing the previous campaign's telling. And an intent posted during a turn got HTTP 200 and then
+vanished with the rest of the intent list - a player spoke, was acknowledged, and was never heard, which is
+the theft the rules forbid in one line ("a failed intent is never a stolen turn") with better manners. So:
+one round in flight, 409 with the id of the round that is resolving, `/api/new` refuses to wipe a table
+mid-turn and a dropped turn is logged rather than spoken over a campaign it never saw, and a round now
+clears only the intents it actually carried, by object identity - a word that arrives during a turn is
+told "queued for round 2" and survives to it.
+
+Two findings were *not* bugs, and are worth keeping straight. `award_xp {party:true}` refusing wholesale
+because one hero is at the cap is what the written rule says: no character may be at the threshold when an
+award is given, so the award is not legal. And a door confirm being burnt by a rejected attempt is
+deliberate in the rules - but a *handoff* confirm is not a door, and it was being burnt by a rejection the
+tracker caused, so that one moved to commit time.
+
+Three process lessons, all ugly:
+
+- **The probes could not run where they were committed.** They imported `./tracker/engine.js` from inside
+  `test/redteam/`, so they had been run from copies elsewhere - which means the scripts in the repo were
+  not the scripts that produced the findings. Fixed, and the same fix revealed a worse one:
+- **Five stale servers were squatting on 876x**, and one answered `/api/state` while 404ing `/api/seat`:
+  a build from before the seat routes. An HTTP finding measured against a stale listener is a finding about
+  a build that is not under review. Both probes now refuse to run unless the listener has the fields the
+  reviewed build has.
+- **I wrote a comment blaming a parser bug I had caused.** My first `charsetRe` used a template literal and
+  failed to parse; I wrote that "`$` before a closing backtick is a thing parsers have opinions about",
+  which was false - my escaping was wrong, and the same class of typo (a missing paren) took down my own
+  test file an hour later. A wrong explanation in the file that fences names is worse than no explanation,
+  because the next reader stops looking. Gone.
+
+The probes print; printing is not law. `test/redteam_law_test.mjs` asserts all of it, and then a seeded
+fuzzer plays 1,680 rounds of random mutation soup - nasty quantities, invented names, transfers to
+yourself, two mutations on one pool - and refuses any run where the engine threw, where the world ended up
+impossible, where a refused strict round moved the world, or where `ok: true` came with a rejection
+attached. It found a real bug on its first run: my own assertion, which had frozen the round counter as
+part of "the world". The counter belongs to the round boundary (`setIntents` advances it), so an attempted
+turn consumes a number whether it commits or not. Whether a refused turn *should* be a round is a question
+for the rules owner, not something to redefine in a test.

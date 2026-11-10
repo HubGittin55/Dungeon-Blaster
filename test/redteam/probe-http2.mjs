@@ -1,5 +1,5 @@
 // Concurrency probes against the LIVE-DM server on :8765 with a 2s-delay DM stub on :8080.
-const BASE = 'http://127.0.0.1:8765';
+const BASE = process.env.BASE_URL || 'http://127.0.0.1:8765';
 async function post(path, body) {
   const r = await fetch(`${BASE}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const text = await r.text();
@@ -11,6 +11,23 @@ async function get(path) {
   return { status: r.status, body: await r.json() };
 }
 const sleep = (ms) => new Promise((s) => setTimeout(s, ms));
+// A probe that drives whatever happens to be listening says nothing about the build under review. Three
+// stale servers from earlier sessions were sitting on 876x when this ran the first time, and one of them
+// predated /api/seat - so an HTTP finding from before this guard existed may have been a finding about a
+// build that was not the one being reviewed. `telling` arrived with the build under review; if the
+// listener does not have it, refuse to run rather than measure the wrong process.
+async function preflight() {
+  let s;
+  try { s = await (await fetch(`${BASE}/api/state`)).json(); }
+  catch (e) { throw new Error(`nothing answering GET ${BASE}/api/state: ${e.message}`); }
+  if (!s || typeof s !== 'object' || !('telling' in s) || !('npcs' in s)) {
+    throw new Error(`${BASE} is a server that predates the build under review (no telling/npcs in state). `
+      + 'Find it and stop it: netstat -ano | findstr LISTENING, then Stop-Process -Id <pid>. Not testing the wrong process.');
+  }
+  console.log(`preflight ok: ${BASE} is the build under review (round ${s.round}, campaign ${s.campaign})`);
+}
+await preflight();
+
 
 async function seatAll() {
   await post('/api/new', {});

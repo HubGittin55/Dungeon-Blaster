@@ -1,6 +1,6 @@
 // Red-team probes against tracker/engine.js (d73ba44). Read-only: no pushes, no server needed.
-import { newGame, setIntents, resolveRound, takeSeat, addMaterials, validateName } from './tracker/engine.js';
-import { loadRules } from './tracker/rules_doc.js';
+import { newGame, setIntents, resolveRound, takeSeat, addMaterials, validateName } from '../../tracker/engine.js';
+import { loadRules } from '../../tracker/rules_doc.js';
 
 const rules = loadRules('rules/rules.md');
 const results = [];

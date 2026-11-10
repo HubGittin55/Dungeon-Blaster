@@ -1078,6 +1078,48 @@
    "at": "2026-11-10T00:07:49.870Z"
   },
   {
+   "id": "it_2_ochregrainclub_1",
+   "style": "shinkai",
+   "kind": "item",
+   "subject_id": "it_2_ochregrainclub_1",
+   "file": "shinkai/it_2_ochregrainclub_1.png",
+   "w": 640,
+   "h": 640,
+   "seed": 633430089,
+   "engine": "anima",
+   "sha256": "7d8b997fa20d5b142cedf9758320acf6dda4af7c6cdc6c00df33dff8e804b868",
+   "prompt": "Ochre-Grain Club, weapon, Common fantasy gear, anime RPG card art, @makoto_shinkai style",
+   "at": "2026-11-10T02:06:38.126Z"
+  },
+  {
+   "id": "npc_ash_2",
+   "style": "shinkai",
+   "kind": "character",
+   "subject_id": "npc_ash_2",
+   "file": "shinkai/npc_ash_2.png",
+   "w": 640,
+   "h": 640,
+   "seed": 1372943330,
+   "engine": "anima",
+   "sha256": "537a18bb71d0bc655db182c2e0d40b0a2e66a91614ed5b6e9e434ba51c7cc317",
+   "prompt": "Ash, npc, anime RPG character portrait, @makoto_shinkai style",
+   "at": "2026-11-10T02:06:43.227Z"
+  },
+  {
+   "id": "it_2_knotwoodclub_1",
+   "style": "shinkai",
+   "kind": "item",
+   "subject_id": "it_2_knotwoodclub_1",
+   "file": "shinkai/it_2_knotwoodclub_1.png",
+   "w": 640,
+   "h": 640,
+   "seed": 13393228,
+   "engine": "anima",
+   "sha256": "be212e12d0ca1c2672db5da50aacf759ef1297a204f4a1955d4b90a5c02c7785",
+   "prompt": "Knotwood club, weapon, Common fantasy gear, anime RPG card art, @makoto_shinkai style",
+   "at": "2026-11-10T02:06:59.619Z"
+  },
+  {
    "id": "Windows_evil",
    "style": "shinkai",
    "kind": "environment",
@@ -1089,7 +1131,7 @@
    "engine": "anima",
    "sha256": "8c92e9946df9df3729055b295939591cd405126029022ca9baf0cebb0463a4f7",
    "prompt": "a room, @makoto_shinkai style",
-   "at": "2026-11-10T01:16:11.239Z"
+   "at": "2026-11-10T02:12:17.299Z"
   },
   {
    "id": "evil",
@@ -1103,7 +1145,7 @@
    "engine": "anima",
    "sha256": "4b336324581d931789b1cf78920c61d3c6c9199e7f5d62b3be1b2212ca6d6227",
    "prompt": "a room, @makoto_shinkai style",
-   "at": "2026-11-10T01:16:13.814Z"
+   "at": "2026-11-10T02:12:19.846Z"
   },
   {
    "id": "Users_public_evil",
@@ -1117,9 +1159,9 @@
    "engine": "anima",
    "sha256": "e981e11dcfb6b4de23095f89bef1248961c1ffe5baa114a7cf0492521cdb5a6d",
    "prompt": "a room, @makoto_shinkai style",
-   "at": "2026-11-10T01:16:16.371Z"
+   "at": "2026-11-10T02:12:22.391Z"
   }
  ],
  "missing": [],
- "updated": "2026-11-10T01:16:16.371Z"
+ "updated": "2026-11-10T02:12:22.391Z"
 }

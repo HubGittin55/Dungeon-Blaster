@@ -28,4 +28,5 @@ const server = createServer(async (req, res) => {
   }
   res.writeHead(404); res.end();
 });
-server.listen(8080, '127.0.0.1', () => console.log(`slow DM stub on :8080, delay ${DELAY}ms`));
+const PORT = Number(process.env.STUB_PORT || 8080);
+server.listen(PORT, '127.0.0.1', () => console.log(`slow DM stub on :${PORT}, delay ${DELAY}ms`));

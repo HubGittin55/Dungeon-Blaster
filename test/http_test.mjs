@@ -39,11 +39,22 @@ const post = async (path, bodyRaw, headers = {}) => {
   return { status: r.status, json, text };
 };
 const get = async (path) => {
-  const r = await fetch(BASE + path);
-  const text = await r.text();
+  const r = await fetch(BASE + path);  const text = await r.text();
   let json = null;
   try { json = JSON.parse(text); } catch { }
   return { status: r.status, json, text };
+};
+
+// Poll until a round lands. A turn is asynchronous by design - /api/round answers 202 and the outcome
+// arrives on SSE - so a test that wants the settled table has to wait for it rather than sleep a guess.
+const until = async (fn, ms = 10_000) => {
+  const t0 = Date.now();
+  for (;;) {
+    const v = await fn().catch(() => null);
+    if (v) return v;
+    if (Date.now() - t0 > ms) return null;
+    await new Promise((s) => setTimeout(s, 100));
+  }
 };
 
 // ---------------------------------------------------------------- spawn
@@ -296,7 +307,116 @@ try {
   console.error(`FAIL  suite crashed: ${e.message}`);
   console.error(output.slice(-1200));
 } finally {
-  running = false;
+  // ----------------------------------------------------------------------------------------------
+// One round at a time, and nobody's words evaporate inside it.
+//
+// A real game master turn is tens of seconds and there is exactly one table. Nothing stopped two
+// rounds resolving against it at once, which the 2026-11-10 review measured with a deliberately slow
+// stub (test/redteam/dm-stub.mjs, 2s a turn): the wood was spent twice and one club appeared; an intent
+// posted during a turn got HTTP 200 and then vanished with the rest of the intent list; and /api/new
+// mid-turn left the fresh table wearing the previous campaign's telling. The stub is imported here at
+// 1.2s so the overlap is real rather than imagined - a mock would pass these three by construction.
+// ----------------------------------------------------------------------------------------------
+
+const SPORT = PORT + 1, GPORT = PORT + 2;
+const SBASE = `http://127.0.0.1:${GPORT}`;
+
+console.log('\n== one round at a time (slow game master, genuine overlap) ==');
+
+const stubUp = await fetch(`http://127.0.0.1:${SPORT}/v1/models`).then(() => 'busy').catch(() => 'free');
+const gameUp = await fetch(`${SBASE}/api/state`).then(() => 'busy').catch(() => 'free');
+if (stubUp === 'busy' || gameUp === 'busy') {
+  console.error(`FAIL  port ${stubUp === 'busy' ? SPORT : GPORT} is already answering. This suite will not drive a process it did not start.`);
+  running = false; child.kill('SIGKILL'); process.exit(1);
+}
+
+const stub = spawn(process.execPath, ['test/redteam/dm-stub.mjs'], {
+  env: { ...process.env, STUB_PORT: String(SPORT), DM_DELAY_MS: '1200' }, stdio: ['ignore', 'pipe', 'pipe'],
+});
+let stubOut = '';
+stub.stdout.on('data', (d) => { stubOut += d; }); stub.stderr.on('data', (d) => { stubOut += d; });
+const slow = spawn(process.execPath, ['game/server.mjs'], {
+  env: { ...process.env, DB_GAME_PORT: String(GPORT), DB_PERSIST: '0', DB_TTS_URL: '', DB_DM_URL: `http://127.0.0.1:${SPORT}` },
+  stdio: ['ignore', 'pipe', 'pipe'],
+});
+let slowOut = '';
+slow.stdout.on('data', (d) => { slowOut += d; }); slow.stderr.on('data', (d) => { slowOut += d; });
+const slowAlive = () => slow.exitCode === null && slow.signalCode === null;
+
+const spost = async (path, body) => {
+  const r = await fetch(`${SBASE}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  let j; try { j = await r.json(); } catch { j = null; }
+  return { status: r.status, body: j };
+};
+const sget = async (path) => (await fetch(`${SBASE}${path}`)).json();
+
+if (!slowAlive()) {
+  console.error('FAIL  the slow-DM server never started');
+  console.error(slowOut.slice(-1200));
+} else {
+  let up = false;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 20_000) {
+    if (!slowAlive()) break;
+    if ((await fetch(`${SBASE}/api/state`).then(() => true).catch(() => false))) { up = true; break; }
+    await new Promise((s) => setTimeout(s, 120));
+  }
+  if (!up) {
+    console.error('FAIL  the slow-DM server never answered /api/state');
+    console.error(slowOut.slice(-1200));
+    fail += 1;
+  } else {
+    await t('a name the rules refuse is a 400 with a code, never a 500 with a thrown error', async () => {
+      const r = await post('/api/seat', { slot: 4, name: 'x', cls: 'Brute', attributes: GOOD_SHEET });
+      assert.equal(r.status, 400, `a one-letter name threw inside the engine until 2026-11-10; the seat route answered 500 and the client called it a server fault`);
+      assert.equal(r.json.rejected[0].code, 'NAME_REJECTED', JSON.stringify(r.json));
+      assert(r.json.rejected[0].allowed.length >= 2, 'the refusal has to hand back the shape a name has');
+    });
+
+    await t('one round at a time: the second POST is refused, and the table pays for exactly one turn', async () => {
+      await spost('/api/new', {});
+      for (const [slot, name, cls] of [[1, 'Bram', 'Brute'], [2, 'Ash', 'Cutter']]) {
+        const s = await spost('/api/seat', { slot, name, cls, attributes: GOOD_SHEET });
+        assert.equal(s.status, 200, `seat ${slot}: ${JSON.stringify(s.body)}`);
+      }
+      await spost('/api/intent', { slot: 1, text: 'I craft a club from wood and sinew' });
+      await spost('/api/intent', { slot: 2, text: 'I watch' });
+
+      const before = await sget('/api/state');
+      const [a, b] = await Promise.all([spost('/api/round', { n: 1 }), spost('/api/round', { n: 1 })]);
+      assert.equal(a.status, 202, 'the first POST is accepted');
+      assert.equal(b.status, 409, `the second POST during a resolving turn must be refused, got ${b.status} ${JSON.stringify(b.body)}`);
+      assert(b.body.in_flight, 'and must name the round it is refusing to stack');
+
+      // Still inside the same turn: words that arrive now cannot join a prompt that is already written,
+      // and /api/new would wipe a table the turn is about to write on.
+      const mid = await spost('/api/intent', { slot: 2, text: 'I shout a warning' });
+      assert.equal(mid.status, 200);
+      assert.equal(mid.body.in_flight, true, 'the server has to say the turn is in flight, not imply it');
+      assert(mid.body.queued_for_round >= 2, `and say when the words land: ${JSON.stringify(mid.body)}`);
+      const reset = await spost('/api/new', {});
+      assert.equal(reset.status, 409, `starting over mid-turn is refused, got ${reset.status}`);
+
+      const settled = await until(async () => {
+        const s = await sget('/api/state');
+        return s.telling.round > 0 ? s : null;
+      }, 15_000);
+      assert(settled, `the turn never landed (server said: ${slowOut.slice(-300)}`);
+      const wood = settled.slots[0].materials.wood;
+      assert.equal(wood, before.slots[0].materials.wood - 2, `one club costs two wood, not four: ${JSON.stringify(settled.slots[0].materials)}`);
+      assert.equal(settled.slots[0].carrying.filter((i) => /club/i.test(i.name)).length, 1, 'one club appeared');
+      assert.equal(settled.slots[1].intent, 'I shout a warning',
+        'a player who spoke during the turn got HTTP 200 and used to lose the words entirely: they have to survive into the round they were promised');
+      const after = await spost('/api/new', {});
+      assert.equal(after.status, 200, 'once the turn lands the table can start over - a guard that cannot be got past is a lock, not a law');
+    });
+  }
+}
+
+running = false;
+stub.kill('SIGKILL');
+slow.kill('SIGKILL');
+
   child.kill('SIGKILL');
   // Kill the tree: a Windows child of node can outlive its parent, and a server left on this port makes the
   // next run of this file test the wrong process.

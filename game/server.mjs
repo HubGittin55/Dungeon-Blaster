@@ -104,6 +104,13 @@ function freshTable() {
 }
 
 let g = freshTable();
+// One game master turn is one moment of the fiction, and a real turn takes tens of seconds. Nothing in
+// the server ever said so. Two POSTs to /api/round both got 202 and both resolved against the same
+// table: the wood was spent twice and one club appeared, and a /api/new that landed mid-turn left the
+// fresh table wearing the previous campaign's telling. The round is the critical section; the door now
+// says so instead of letting four tabs and a laggy laptop discover it. Measured, not theorised:
+// test/redteam/probe-http2.mjs with a 2s stub, and the "one round at a time" section of test/http_test.
+let roundInFlight = null; // { id, started } while a turn is resolving, else null
 
 /**
  * A legal sheet, dealt.
@@ -417,8 +424,15 @@ function publicState() {
 }
 
 async function playRound(count = 1) {
+  if (roundInFlight) return false; // the route answers 409; this is the belt for every other caller
+  const ticket = (roundInFlight = { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, started: Date.now() });
+  const mine = g; // the table this turn belongs to, so a reset mid-turn can be recognised and dropped
+  try {
   for (let r = 0; r < Math.min(4, Math.max(1, count)); r++) {
-    const intents = g.intents.filter(Boolean).map((i) => ({ ...i }));
+    // The objects this round carries, kept by identity: a word that arrives while the game master is
+    // deciding must survive into the next round, and clearing by slot or by id would eat it as well.
+    const consumed = g.intents.filter(Boolean);
+    const intents = consumed.map((i) => ({ ...i }));
     setIntents(g, intents, { order_seed: randomUUID().replace(/-/g, '').slice(0, 16) });
     const t0 = performance.now();
     let out;
@@ -427,6 +441,13 @@ async function playRound(count = 1) {
     } catch (e) {
       emit('error', { msg: `DM turn failed: ${e.message}`, hint: FAKE ? '' : 'is the DM server up? launch-alpha.ps1 starts it' });
       continue;
+    }
+    if (mine !== g) {
+      // Someone started a new table while this turn was in the model. The old table is gone, so the turn
+      // is dropped rather than spoken over a campaign it knows nothing about - and "dropped" is logged,
+      // because a round that vanishes without a word is the thing a table cannot debug afterwards.
+      emit('log', { level: 'warn', msg: 'the table was reset while this round was resolving; the turn is dropped, not spoken over the new campaign' });
+      return true;
     }
     const ms = Math.round(performance.now() - t0);
     const { call, result, attempts } = out;
@@ -456,12 +477,19 @@ async function playRound(count = 1) {
       tokens_out: attempts[attempts.length - 1]?.log?.tokens_out ?? null,
       art,
     });
-    // Cleared before the state frame goes out, or the client repaints a round that has already been spent
-    // and shows an intent the table is no longer holding.
-    g.intents = [];
+    // Only the intents this round carried are cleared. Words that arrived while the game master was
+    // deciding belong to the next round: they used to be wiped with everything else, so a player who
+    // typed during a 40-second turn got HTTP 200 and then nothing at all - their line unspoken, their
+    // seat quiet, and no rejection to point at. The rules are explicit that a failed intent is never a
+    // stolen turn; silently discarding one is the same theft with better manners.
+    g.intents = g.intents.filter((i) => !consumed.includes(i));
     emit('state', publicState());
     if (process.env.DB_PERSIST) { try { saveGame(g); } catch (e) { emit('log', { level: 'warn', msg: `persist failed: ${e.message}` }); } }
   }
+  } finally {
+    if (roundInFlight === ticket) roundInFlight = null;
+  }
+  return true;
 }
 
 // ------------------------------------------------------------------------ http
@@ -593,13 +621,31 @@ const server = createServer(async (req, res) => {
       // In-round intent, straight onto the mutable tail. setIntents() belongs to the round boundary
       // because it advances the round counter and re-seeds contention.
       g.intents = [...g.intents.filter((i) => i.slot !== s), { id: `r${g.round + 1}s${s}`, slot: s, text: clean, ready: true }];
+      // Say which round the words belong to. During a turn they cannot make that turn - the prompt is
+      // already written - and the honest answer is "next", not a 200 that quietly means "lost".
       emit('state', publicState());
+      return json(res, 200, {
+        ok: true, slot: s, text: clean,
+        queued_for_round: g.round + 1,
+        in_flight: !!roundInFlight,
+        why: roundInFlight ? 'the round being decided was written before this was said; it lands in the next one' : null,
+      });
       return json(res, 200, { ok: true, slot: s, text: clean });
     }
 
     if (req.method === 'POST' && path === '/api/round') {
       const q = await readJSON(req, res);
       if (!q) return;
+      if (roundInFlight) {
+        // 409, not a queued 202: a second round behind the first would resolve against the state the
+        // first is about to change, which is how a round gets paid for and nothing arrives.
+        return json(res, 409, {
+          error: 'a round is already resolving',
+          in_flight: roundInFlight.id,
+          elapsed_ms: Date.now() - roundInFlight.started,
+          reason: 'one game master turn at a time: two rounds resolving at once spend the same wood twice',
+        });
+      }
       // Answered immediately: a real DM turn is tens of seconds, and the client learns the outcome on SSE.
       json(res, 202, { ok: true, pending: true, mode: FAKE ? 'fake-dm' : 'live-dm' });
       playRound(Number(q.n) || 1);
@@ -728,6 +774,15 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && path === '/api/new') {
+      if (roundInFlight) {
+        // Wiping the table mid-turn is how a fresh campaign inherited the old one's telling. The turn is
+        // dropped if it lands after a reset, but the polite answer is to say "in a moment" instead.
+        return json(res, 409, {
+          error: 'a round is resolving; start over the moment it lands',
+          in_flight: roundInFlight.id,
+          elapsed_ms: Date.now() - roundInFlight.started,
+        });
+      }
       g = freshTable();
       telling = { round: 0, text: OPENING_TELLING, bark: false };
       emit('state', publicState());

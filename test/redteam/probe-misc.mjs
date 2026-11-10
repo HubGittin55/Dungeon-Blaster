@@ -1,8 +1,8 @@
 // Two quick confirmations: (a) checkTransfer burns the confirm on a rejected round;
 // (b) a corrupt manifest degrades gracefully.
-import { newGame, setIntents, resolveRound, takeSeat, addMaterials } from './tracker/engine.js';
-import { loadRules } from './tracker/rules_doc.js';
-import { loadArt } from './game/art.mjs';
+import { newGame, setIntents, resolveRound, takeSeat, addMaterials } from '../../tracker/engine.js';
+import { loadRules } from '../../tracker/rules_doc.js';
+import { loadArt } from '../../game/art.mjs';
 import { writeFileSync, mkdirSync } from 'node:fs';
 
 const rules = loadRules('rules/rules.md');

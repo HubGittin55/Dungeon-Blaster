@@ -1,6 +1,6 @@
 // Within-round double-spend: two crafts in ONE round, each legal alone, overdrawing together.
-import { newGame, setIntents, resolveRound, takeSeat, addMaterials } from './tracker/engine.js';
-import { loadRules } from './tracker/rules_doc.js';
+import { newGame, setIntents, resolveRound, takeSeat, addMaterials } from '../../tracker/engine.js';
+import { loadRules } from '../../tracker/rules_doc.js';
 
 const rules = loadRules('rules/rules.md');
 function seatAll(g) {

@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { loadRules } from '../tracker/rules_doc.js';
 import { newGame, joinSlot, addMaterials, setIntents, resolveRound } from '../tracker/engine.js';
-import { runTurn, barkFor, RULES_PATH, STARTING_KIT } from '../game/gm.mjs';
+import { runTurn, barkFor, dmComplete, narrationSoFar, loadSchema, RULES_PATH, STARTING_KIT } from '../game/gm.mjs';
 
 const rules = loadRules(RULES_PATH);
 let pass = 0, fail = 0;
@@ -190,6 +190,89 @@ await t('a round with nothing to pay for still commits', async () => {
   assert.equal(result.ok, true, JSON.stringify(result.rejected));
   assert.equal(result.committed.length, 0);
   assert.match(result.turn_log.narration, /does not change/);
+});
+
+await t('a character survives a round and keeps what it crafted', async () => {
+  // Blarmo's playtest: a character created by generation was present, then gone after the round actions.
+  // No server-side deletion was ever reproduced, so this locks in the invariant the client fix depends on:
+  // a round commits its mutations and leaves every seated character standing, sheet and kit intact.
+  const g = table();
+  const { complete } = scripted(said('You lash wood to sinew and it holds.', [club()]));
+  const { result } = await runTurn(g, { complete });
+  assert.ok(result.ok, JSON.stringify(result.rejected));
+  const ch = g.characters[1];
+  assert.ok(ch, 'slot 1 has no character after the round');
+  assert.equal(ch.name, 'P1');
+  assert.equal(Object.keys(ch.inventory).length, 1, 'the crafted club is gone');
+  assert.equal(g.items[Object.keys(ch.inventory)[0]].name, 'Oaken club');
+});
+
+await t('the DM prompt carries the character sheets and the round intents', async () => {
+  // Blarmo's playtest: the DM described the starting environment and never mentioned the characters or
+  // what they did. The prompt was not the problem - stateSnapshot already names every seated character
+  // and the mutable tail already lists every intent verbatim - but nothing in the suite proved it, so a
+  // refactor that dropped either half would read as "the DM is ignoring us" instead of a test failure.
+  const g = table([
+    { slot: 1, id: 'i1', text: 'lash a wood shaft to a knot of sinew' },
+    { slot: 2, id: 'i2', text: 'listen along the wall' },
+  ]);
+  const { complete, seen } = scripted(said('Two people do two things.', [club('m1', 1, 'i1'), club('m2', 2, 'i2')]));
+  await runTurn(g, { complete });
+  const tail = seen[0][seen[0].length - 1].content;
+  assert.match(tail, /P1/, 'prompt does not name slot 1');
+  assert.match(tail, /P2/, 'prompt does not name slot 2');
+  assert.match(tail, /lash a wood shaft/, 'prompt does not carry intent i1');
+  assert.match(tail, /listen along the wall/, 'prompt does not carry intent i2');
+});
+
+await t('narrationSoFar pulls the narration out of a still-incomplete contract', async () => {
+  assert.equal(narrationSoFar('{"narration": "You lash wood'), 'You lash wood');
+  assert.equal(narrationSoFar('{"narration": "You lash wood to sinew and it holds.", "mutations": []}'), 'You lash wood to sinew and it holds.');
+  assert.equal(narrationSoFar('{"narration": "He said \\"hi\\" and left'), 'He said "hi" and left');
+  assert.equal(narrationSoFar('{"mutations": []}'), '');
+  assert.equal(narrationSoFar(''), '');
+});
+
+await t('dmComplete streams tokens and still returns the whole contract', async () => {
+  // The 12-15 second delay was dmComplete awaiting res.json() on the whole contract. With stream:true
+  // the tokens arrive incrementally and onDelta fires per chunk, while the caller still gets the same
+  // parsed contract at the end (the gate needs all of it). A mock SSE server stands in for the DM.
+  const { createServer } = await import('node:http');
+  const contract = { narration: 'You lash wood to sinew and it holds.', mutations: [] };
+  const full = JSON.stringify(contract);
+  const chunks = [];
+  for (let i = 0; i < full.length; i += 7) chunks.push(full.slice(i, i + 7));
+  const server = createServer((req, res) => {
+    if (req.url === '/v1/chat/completions') {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      for (const c of chunks) res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: c } }] })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    } else { res.writeHead(404); res.end(); }
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+  const prevUrl = process.env.DB_DM_URL;
+  const prevModel = process.env.DB_DM_MODEL;
+  process.env.DB_DM_URL = `http://127.0.0.1:${port}`;
+  process.env.DB_DM_MODEL = 'mock';
+  try {
+    let deltas = 0;
+    let firstAt = null;
+    const t0 = Date.now();
+    const out = await dmComplete([{ role: 'user', content: 'hi' }], {
+      schema: loadSchema(),
+      onDelta: () => { deltas++; if (firstAt === null) firstAt = Date.now() - t0; },
+    });
+    assert.ok(deltas > 1, `onDelta fired ${deltas} times, expected many`);
+    assert.ok(firstAt !== null && firstAt < 1000, `first delta took ${firstAt}ms`);
+    assert.equal(out.narration, contract.narration);
+    assert.deepEqual(out.mutations, []);
+  } finally {
+    if (prevUrl === undefined) delete process.env.DB_DM_URL; else process.env.DB_DM_URL = prevUrl;
+    if (prevModel === undefined) delete process.env.DB_DM_MODEL; else process.env.DB_DM_MODEL = prevModel;
+    server.close();
+  }
 });
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

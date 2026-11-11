@@ -21,7 +21,7 @@
   .pill.fake { color:var(--violet); border-color:#4a3f5c }
   .dot { width:9px;height:9px;border-radius:99px;background:var(--blood);display:inline-block;margin-right:6px }
   .dot.on { background:var(--moss) }
-  main { display:grid; grid-template-columns:1fr 340px; gap:18px; padding:18px 20px 40px; max-width:1500px; margin:0 auto }
+  main { display:grid; grid-template-columns:360px 1fr; gap:18px; padding:18px 20px 40px; max-width:1500px; margin:0 auto }
   @media (max-width:1080px){ main{grid-template-columns:1fr} }
   button { font:inherit; background:#241d17; color:var(--ink); border:1px solid var(--line); border-radius:8px;
            padding:8px 13px; cursor:pointer }
@@ -32,13 +32,12 @@
   section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px }
   h2 { font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--dim); margin:0 0 10px }
   /* the narration panel is the game - everything else is furniture around it */
-  #say { min-height:126px; font-size:27px; line-height:1.42; letter-spacing:.005px }
+  #say { min-height:96px; font-size:27px; line-height:1.42; letter-spacing:.005px }
   #say.bark { color:var(--amber); font-size:22px; font-style:italic }
   #say.typing::after { content:"▌"; color:var(--amber); animation:bl 1s steps(2) infinite }
   @keyframes bl { 50%{opacity:0} }
   #blocked { margin-top:10px; font:12.5px/1.5 ui-monospace,monospace; color:var(--blood); white-space:pre-wrap }
-  .slots { display:grid; grid-template-columns:1fr 1fr; gap:12px }
-  @media (max-width:640px){ .slots{grid-template-columns:1fr} }
+  .slots { display:grid; grid-template-columns:1fr; gap:12px }
   .slot { border:1px solid var(--line); border-radius:10px; padding:12px; background:#1d1712 }
   .slot.spoke { border-color:#4a3d24 }
   .slot h3 { margin:0 0 2px; font-size:16px }
@@ -63,7 +62,7 @@
   .place { color:var(--dim); font-style:italic }
   .foot { font:11.5px/1.5 ui-monospace,monospace; color:#6b5c4c; margin-top:9px }
   /* The room the party is standing in, at the size of the thing they are actually looking at. */
-  #hero{position:relative;aspect-ratio:16/9;max-height:46vh;background:#0c0906;border:1px solid #3a2a19;
+  #hero{position:relative;aspect-ratio:16/9;max-height:30vh;background:#0c0906;border:1px solid #3a2a19;
        border-radius:6px;overflow:hidden;display:grid;place-items:center;margin-bottom:14px}
   #hero img{width:100%;height:100%;object-fit:cover;display:block}
   #hero .hero-empty{padding:20px;text-align:center;color:#8a7157;font-style:italic;max-width:72%}
@@ -120,6 +119,14 @@
 <main>
   <div>
     <section>
+      <h2>Four voices, one couch <button id="seatall" class="quiet" title="Deal four legal sheets and get on with it">Seat four at random</button></h2>
+      <div class="slots" id="slots"></div>
+      <div class="foot">The mic button records until you press it again, then hands the audio to the speech-to-text server. Nothing is sent to the game master until you accept the words in the box - the tracker treats a mishearing you did not look at as a real intent.</div>
+    </section>
+  </div>
+
+  <div>
+    <section>
       <div id="hero"><div class="hero-empty">This room has never been seen. Describe it below, then paint it.</div></div>
       <h2>The telling</h2>
       <div id="say">Four of you wake up in a damp cell with a door and a rumour of stairs. Say what you do, then press <b>Play round</b>.</div>
@@ -132,14 +139,6 @@
     </section>
 
     <section style="margin-top:16px">
-      <h2>Four voices, one couch <button id="seatall" class="quiet" title="Deal four legal sheets and get on with it">Seat four at random</button></h2>
-      <div class="slots" id="slots"></div>
-      <div class="foot">The mic button records until you press it again, then hands the audio to the speech-to-text server. Nothing is sent to the game master until you accept the words in the box - the tracker treats a mishearing you did not look at as a real intent.</div>
-    </section>
-  </div>
-
-  <div>
-    <section>
       <h2>Cards</h2>
       <div class="cards" id="cards"><div class="foot">No cards in play yet.</div></div>
     </section>
@@ -213,7 +212,18 @@ events.addEventListener('error', (e) => {
 events.addEventListener('round', (e) => {
   const r = JSON.parse(e.data);
   setBusy(false);
-  tell(r.spoken || '(nothing to say)', !!r.bark);
+  justRounded = true;
+  const spoken = r.spoken || '(nothing to say)';
+  if (draftText !== null && draftText === spoken) {
+    // The table already watched this sentence arrive as a draft; display it whole, do not retype it.
+    clearInterval(typer);
+    toldText = spoken;
+    say.className = r.bark ? 'bark' : '';
+    say.textContent = spoken;
+  } else {
+    tell(spoken, !!r.bark);
+  }
+  draftText = null;
   $('blocked').textContent = (r.blocked ? `the gate withheld the model's sentence: ${r.blocked}\n` : '')
     + (r.rejected || []).map((x) => `REJECTED ${x.id} ${x.code}: ${x.reason}${x.allowed ? `\n   allowed: ${x.allowed.join(', ')}` : ''}`).join('\n');
   const tps = r.tokens_out ? ` · ${r.tokens_out} tok in ${(r.ms / 1000).toFixed(1)}s` : '';
@@ -263,10 +273,39 @@ function deck(s) {
 events.addEventListener('roll', (e) => showRoll(JSON.parse(e.data).value));
 // The narrator's clip arrives from the server as a data URL. Browsers refuse the first unasked sound, so a
 // failure here is reported rather than swallowed - silence with no explanation is how this stayed broken.
+// One clip, one play. The server broadcasts the speech event to every open tab, so four tabs on one
+// couch used to play the same narration four times over. Each clip carries a unique id; this tab claims
+// it once in memory and once in localStorage (so the other tabs see the claim), and every other tab
+// stays quiet. A clip with no id (an older server) plays once per tab, as before.
+const playedClips = new Set();
+function claimClip(id) {
+  if (!id) return true;
+  if (playedClips.has(id)) return false;
+  playedClips.add(id);
+  try {
+    const key = `db-clip-${id}`;
+    if (localStorage.getItem(key)) return false;
+    localStorage.setItem(key, String(Date.now()));
+  } catch { /* private mode: the in-memory Set is the claim */ }
+  return true;
+}
 events.addEventListener('speech', (e) => {
   const d = JSON.parse(e.data);
+  if (!claimClip(d.id)) return;
   const a = new Audio(d.clip);
   a.play().catch((err) => log(`browser blocked the narrator (${err.name}) - click the page once, then press Voice`, 'warn'));
+});
+
+// The draft is the narration arriving live, token by token. It is painted whole and at once (no
+// typewriter - the stream IS the typing), and when the round lands with the same text, the round
+// handler does not retype what the table already watched arrive.
+let draftText = null;
+events.addEventListener('draft', (e) => {
+  const d = JSON.parse(e.data);
+  draftText = String(d.text || '');
+  clearInterval(typer);
+  say.className = '';
+  say.textContent = draftText;
 });
 
 function mode(m) {
@@ -296,10 +335,30 @@ function draw(s) {
   }
   room(s.place);
   deck(s);
+  // Typed words survive a redraw. draw() rebuilds every slot card on each state event, and the first
+  // version set each action box from the server's intent (or empty), so text typed but not yet submitted
+  // evaporated before Play round could send it. Capture the boxes first, restore them after - except
+  // right after a round, when the words were consumed: resurrecting them would submit the same action
+  // twice. justRounded is set by the round handler and spent by the next draw.
+  const typed = new Map();
+  document.querySelectorAll('#slots .slot[data-slot] input').forEach((inp) => {
+    const slot = inp.closest('.slot')?.dataset.slot;
+    if (slot && inp.value.trim()) typed.set(Number(slot), inp.value);
+  });
   const box = $('slots');
   box.innerHTML = '';
   for (const p of s.slots) box.append(p.seated ? seatedCard(p) : createCard(p.slot));
+  if (!justRounded) {
+    for (const [slot, value] of typed) {
+      const inp = document.querySelector(`#slots .slot[data-slot="${slot}"] input`);
+      if (inp) inp.value = value;
+    }
+  }
+  justRounded = false;
 }
+
+// Set by the round handler; the next draw spends it (see draw()).
+let justRounded = false;
 
 // The room, in words and then in pixels. A location with no art is not an error - it is a room nobody has
 // described yet, and the screen says so and offers the box that fixes it.
@@ -512,8 +571,18 @@ $('paintbtn').addEventListener('click', async () => {
 });
 $('seatall').addEventListener('click', async () => {
   const open = (LAST?.seats_open) || [1, 2, 3, 4];
-  for (const slot of open) await fetch('/api/seat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ slot, random: true }) });
-  log(`dealt ${open.length} sheet${open.length > 1 ? 's' : ''} \u2014 the rules checked each one`);
+  let dealt = 0;
+  const refused = [];
+  for (const slot of open) {
+    const r = await fetch('/api/seat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ slot, random: true }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) dealt += 1;
+    else refused.push(`slot ${slot}: ${(j.rejected || [{ reason: j.error || 'refused' }]).map((x) => x.reason).join('; ')}`);
+  }
+  // The first version logged "dealt N sheets" without reading a single response, so a refused sheet
+  // looked seated until the chair came up empty. A refusal is now reported, not hidden.
+  if (dealt) log(`dealt ${dealt} sheet${dealt > 1 ? 's' : ''} \u2014 the rules checked each one`);
+  for (const msg of refused) log(msg, 'err');
 });
 $('scene-desc').addEventListener('input', (ev) => { ev.target.dataset.touched = '1'; });
 $('voicebtn').addEventListener('click', async () => {

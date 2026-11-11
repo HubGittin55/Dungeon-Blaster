@@ -23,7 +23,7 @@ import {extname, join, normalize, resolve, sep } from 'node:path';
 import { randomUUID, randomInt } from 'node:crypto';
 import { loadRules } from '../tracker/rules_doc.js';
 import { newGame, joinSlot, addMaterials, setIntents, saveGame, takeSeat, characterLaw } from '../tracker/engine.js';
-import { runTurn, loadSchema, barkFor, RULES_PATH, ROOT, SLOT_NAMES, STARTING_KIT } from './gm.mjs';
+import { runTurn, loadSchema, barkFor, narrationSoFar, RULES_PATH, ROOT, SLOT_NAMES, STARTING_KIT } from './gm.mjs';
 import { loadArt, assetId } from './art.mjs';
 import { ART_STYLES, DEFAULT_STYLE, resolveStyle, styleTag } from './art/styles.mjs';
 import { readFile as readText, writeFile as writeText } from 'node:fs/promises';
@@ -39,7 +39,7 @@ const OPENING_TELLING = 'Four of you wake up in a damp cell with a door and a ru
 let telling = { round: 0, text: OPENING_TELLING, bark: false };
 const TTS_URL = process.env.DB_TTS_URL || '';
 const ASR_URL = process.env.DB_ASR_URL || 'http://127.0.0.1:8081';
-const TTS_VOICE = process.env.DB_TTS_VOICE || 'af';
+const TTS_VOICE = process.env.DB_TTS_VOICE || 'dm';
 
 /**
  * What is this box called?
@@ -254,15 +254,25 @@ function paintQueued(job) {
  * It used to POST the text and throw the response away, so the narrator had never once been audible and the
  * code looked like it worked. Still fire-and-forget in the round path: a 20-second voice render must never
  * hold up a table, so narration audio arrives a beat late rather than blocking a beat.
+ *
+ * Two callers, two shapes. The round path speaks through the event (every tab hears it once, by clip id).
+ * The Voice button wants the WAV back so it can play it itself - and the first version got both, the event
+ * AND the bytes, so one line played twice a hundred milliseconds apart. `emitEvent: false` is the Voice
+ * button's shape; the round path keeps the event.
+ *
+ * The voice is a parameter now, not a suggestion: `speak(text, voice)` used to accept a voice and then
+ * ignore it, and the default was 'af' - a Kokoro family prefix, not a voice preset - so the box answered
+ * with its own default voice, which is not stable across calls. The default is 'dm' (the Jason narrator
+ * preset in the box's server.json) and the voice actually reaches the request.
  */
-async function speakNow(text) {
+async function speakNow(text, { voice = TTS_VOICE, emitEvent = true } = {}) {
   if (!TTS_URL || !text) return null;
   const origin = new URL(TTS_URL).origin;
   const model = await modelId(origin, 'tts');
   const r = await fetch(TTS_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model, input: text, voice: TTS_VOICE, response_format: 'wav' }),
+    body: JSON.stringify({ model, input: text, voice, response_format: 'wav' }),
     signal: AbortSignal.timeout(120_000),
   });
   if (!r.ok) {
@@ -271,12 +281,16 @@ async function speakNow(text) {
     return null;
   }
   const buf = Buffer.from(await r.arrayBuffer());
-  emit('speech', { clip: `data:audio/wav;base64,${buf.toString('base64')}`, bytes: buf.length, text });
+  // One clip, one id. The event is broadcast to every open tab and each tab plays what it hears, so four
+  // tabs on one couch used to play the same narration four times over. The client claims a clip id once
+  // (in-memory plus a localStorage cross-tab claim); every other tab stays quiet.
+  const id = `clip-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+  if (emitEvent) emit('speech', { id, clip: `data:audio/wav;base64,${buf.toString('base64')}`, bytes: buf.length, text });
   return buf;
 }
 
 function speak(text, voice = 'dm') {
-  speakNow(text).catch((e) => emit('log', { msg: `narrator silent: ${e.message} - is the voice box up on :8082?` }));
+  speakNow(text, { voice }).catch((e) => emit('log', { msg: `narrator silent: ${e.message} - is the voice box up on :8082?` }));
 }
 
 // A voice line the player can click, because "the narrator is wired up" is not a thing anyone can believe
@@ -437,7 +451,19 @@ async function playRound(count = 1) {
     const t0 = performance.now();
     let out;
     try {
-      out = await runTurn(g, { ctx: {}, schema, complete: FAKE ? fakeComplete(g) : undefined, notify: (m) => emit('log', { msg: m }) });
+      // The draft is the table watching the sentence arrive: runTurn streams the DM's tokens through
+      // onDelta, and each growth of the narration field goes out as a `draft` event. The contract is
+      // still parsed whole at the end (the gate needs all of it), but the players see words in tens of
+      // milliseconds instead of waiting 12-15 seconds for the closing brace.
+      let draftShown = '';
+      const onDelta = (delta, full) => {
+        const narr = narrationSoFar(full);
+        if (narr && narr !== draftShown) {
+          draftShown = narr;
+          emit('draft', { text: narr });
+        }
+      };
+      out = await runTurn(g, { ctx: {}, schema, complete: FAKE ? fakeComplete(g) : undefined, notify: (m) => emit('log', { msg: m }), onDelta });
     } catch (e) {
       emit('error', { msg: `DM turn failed: ${e.message}`, hint: FAKE ? '' : 'is the DM server up? launch-alpha.ps1 starts it' });
       continue;
@@ -514,6 +540,8 @@ function json(res, code, obj) {
  * assemble a 2 GB body in RAM on a laptop that is also holding a 35B model, a TTS model and ComfyUI.
  */
 const MAX_BODY = 64 * 1024;
+// STT audio: 16 kHz mono 16-bit WAV runs 32 KB a second, so 8 MB is about four minutes of speech.
+const MAX_AUDIO = 8 * 1024 * 1024;
 async function body(req, max = MAX_BODY) {
   const chunks = [];
   let size = 0;
@@ -747,7 +775,9 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && path === '/api/voice_test') {
-      const buf = await speakNow(VOICE_TEST_LINE);
+      // emitEvent: false - the button plays the WAV it gets back. The first version also emitted the
+      // speech event, so the same line played twice, a hundred milliseconds apart.
+      const buf = await speakNow(VOICE_TEST_LINE, { emitEvent: false });
       if (!buf) {
         return json(res, 502, { error: 'narrator did not answer', hint: TTS_URL ? `nothing came back from ${TTS_URL}` : 'voice is off - launch without -NoVoice' });
       }
@@ -755,7 +785,16 @@ const server = createServer(async (req, res) => {
       return res.end(buf);
     }
     if (req.method === 'POST' && path === '/api/say') {
-      const wav = await body(req);
+      // 16 kHz mono 16-bit WAV is 32 KB a second, so the default 64 KB body cap refused any utterance
+      // over about two seconds with a 413 - which is why STT never worked. Eight megabytes is about four
+      // minutes of speech; past that the answer is a graceful 413, not a silent drop.
+      let wav;
+      try { wav = await body(req, MAX_AUDIO); }
+      catch (e) {
+        if (e.status === 413) return json(res, 413, { error: 'audio over 8 MB - about four minutes of speech is the limit' });
+        if (e.status === 499) return null;
+        return json(res, 500, { error: e.message });
+      }
       if (!wav.length) return json(res, 400, { error: 'no audio' });
       const fd = new FormData();
       fd.append('file', new Blob([wav], { type: 'audio/wav' }), 'talk.wav');

@@ -67,11 +67,11 @@ export async function dmModel() {
  * `complete` is injectable so the whole turn - retry, gate, fallback - is testable without a GPU, and so
  * the alpha can run with --fake-dm on a machine that has no model loaded yet.
  */
-export async function dmComplete(messages, { signal, schema, log } = {}) {
+export async function dmComplete(messages, { signal, schema, log, onDelta } = {}) {
   const res = await fetch(`${dmUrl()}/v1/chat/completions`, {
     method: 'POST',
     signal: signal || AbortSignal.timeout(180_000),
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'Accept': 'text/event-stream' },
     body: JSON.stringify({
       model: await dmModel(),
       messages,
@@ -79,18 +79,102 @@ export async function dmComplete(messages, { signal, schema, log } = {}) {
       max_tokens: Number(process.env.DB_DM_MAX_TOKENS || 900),
       chat_template_kwargs: { force_reasoning: false },
       response_format: { type: 'json_schema', json_schema: { name: 'resolve_round', strict: true, schema } },
+      stream: true,
     }),
   });
   if (!res.ok) throw new Error(`DM endpoint ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const body = await res.json();
-  const text = body?.choices?.[0]?.message?.content;
-  if (log && body?.timings) log.tokens_out = body.timings.prediction_count ?? null;
+  const contentType = res.headers.get('content-type') || '';
+  let text;
+  if (contentType.includes('text/event-stream')) {
+    text = await readChatStream(res, onDelta);
+  } else {
+    // The server ignored stream:true and answered with the whole contract. Fall back to the buffered
+    // body so the caller still gets the same parsed contract; the table just waits longer for it.
+    const body = await res.json();
+    text = body?.choices?.[0]?.message?.content;
+    if (log && body?.timings) log.tokens_out = body.timings.prediction_count ?? null;
+    if (onDelta && text) onDelta(text, text);
+  }
   if (!text) throw new Error('DM returned no content');
   try {
     return JSON.parse(text);
   } catch {
     return null; // unparseable is a contract violation, not a crash
   }
+}
+
+/**
+ * Read an OpenAI-compatible SSE chat stream, calling onDelta(delta, fullText) per token chunk and
+ * returning the accumulated contract text. A line is `data: {...}` with the token in
+ * choices[0].delta.content; `data: [DONE]` ends it. A partial line is skipped, not fatal.
+ */
+export async function readChatStream(res, onDelta) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let text = '';
+  const feed = (payload) => {
+    if (!payload || payload === '[DONE]') return;
+    try {
+      const j = JSON.parse(payload);
+      const delta = j?.choices?.[0]?.delta?.content || '';
+      if (delta) {
+        text += delta;
+        if (onDelta) onDelta(delta, text);
+      }
+    } catch { /* a partial line is not a contract violation */ }
+  };
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (line.startsWith('data:')) feed(line.slice(5).trim());
+    }
+  }
+  const tail = buf.trim();
+  if (tail.startsWith('data:')) feed(tail.slice(5).trim());
+  return text;
+}
+
+/**
+ * The narration field out of a still-incomplete JSON contract. The DM writes narration first, so while
+ * the stream is running the contract is a prefix that ends mid-sentence; this pulls the narration out of
+ * that prefix (unescaping as it goes) so the table can watch the sentence arrive instead of waiting for
+ * the closing brace. Returns '' when the narration key has not arrived yet.
+ */
+export function narrationSoFar(partial) {
+  if (typeof partial !== 'string') return '';
+  const key = partial.indexOf('"narration"');
+  if (key < 0) return '';
+  const colon = partial.indexOf(':', key + 11);
+  if (colon < 0) return '';
+  let i = colon + 1;
+  while (i < partial.length && /\s/.test(partial[i])) i++;
+  if (partial[i] !== '"') return '';
+  i++;
+  let out = '';
+  while (i < partial.length) {
+    const c = partial[i];
+    if (c === '\\' && i + 1 < partial.length) {
+      const n = partial[i + 1];
+      if (n === '"') out += '"';
+      else if (n === '\\') out += '\\';
+      else if (n === 'n') out += '\n';
+      else if (n === 't') out += '\t';
+      else if (n === 'r') out += '\r';
+      else out += n;
+      i += 2;
+      continue;
+    }
+    if (c === '"') break; // end of the value
+    out += c;
+    i++;
+  }
+  return out;
 }
 
 export function stateSnapshot(g) {
@@ -165,7 +249,7 @@ export function barkFor(turnLog, pick = Math.random) {
  * test/turn_test.mjs asserts that second attempts keep byte-identical prefixes, because this is the kind
  * of thing that regresses as a one-character "improvement" to the persona and costs 151s per round.
  */
-export async function runTurn(g, { ctx = {}, fallback = true, complete = dmComplete, gate = resolveRound, schema = loadSchema(), notify = () => {} } = {}) {
+export async function runTurn(g, { ctx = {}, fallback = true, complete = dmComplete, gate = resolveRound, schema = loadSchema(), notify = () => {}, onDelta } = {}) {
   const intents = g.intents;
   const needed = rulesForCall(g, MUTATIONS_FOR_PROMPT);
 
@@ -194,7 +278,7 @@ ${contractNote()}`,
   while (attempt <= 2) {
     notify(`DM turn, attempt ${attempt}...`, 'info');
     const log = {};
-    const proposal = await complete(messages, { signal: ctx.signal, schema, log, attempt });
+    const proposal = await complete(messages, { signal: ctx.signal, schema, log, attempt, onDelta });
     attempts.push({ attempt, messages: messages.map((m) => ({ ...m })), log });
     if (!proposal) {
       messages = [...messages, { role: 'user', content: 'That was not valid JSON matching the contract. Try again.' }];
